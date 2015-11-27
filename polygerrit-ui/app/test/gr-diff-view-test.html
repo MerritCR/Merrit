@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<!--
+Copyright (C) 2015 The Android Open Source Project
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+-->
+
+<meta name="viewport" content="width=device-width, minimum-scale=1.0, initial-scale=1.0, user-scalable=yes">
+<title>gr-diff-view</title>
+
+<script src="../../bower_components/webcomponentsjs/webcomponents.min.js"></script>
+<script src="../../bower_components/web-component-tester/browser.js"></script>
+<script src="../../bower_components/test-fixture/test-fixture-mocha.js"></script>
+<script src="../scripts/changes.js"></script>
+<script src="../scripts/util.js"></script>
+<link rel="import" href="../../bower_components/test-fixture/test-fixture.html">
+<link rel="import" href="../../bower_components/iron-test-helpers/iron-test-helpers.html">
+<link rel="import" href="../elements/gr-diff-view.html">
+
+<test-fixture id="basic">
+  <template>
+    <gr-diff-view ruler-width="0"></gr-diff-view>
+  </template>
+</test-fixture>
+
+<test-fixture id="comments">
+  <template>
+    <gr-diff-view></gr-diff-view>
+  </template>
+</test-fixture>
+
+
+<script>
+  suite('gr-diff-view tests', function() {
+    var element;
+    var elWithComments;
+    // Original diff:
+    // Left side (side A):
+    // 1: if i < 5 { // "comments" &= \'fun\' && true
+    // 2:   println("i is less than five")
+    // 3: }
+    // 4:
+    // 5:
+    // 6: // Comment
+    // 7: foo
+    // 8: bar
+    // 9: Bad news: combustible lemons failed.
+    //
+    // Right side (side B):
+    // 1: if i < 5 { // "comments" &= \'fun\' && true
+    // 2:   println("i is less than five")
+    // 3: }
+    // 4:
+    // 5:
+    // 6: // Comment
+    // 7: baz
+    // 8: Bad news: combustible lemons failed.
+    //
+    var diffContent = [
+      {
+        ab: [
+          'if i < 5 { // "comments" &= \'fun\' && true',
+          '  println("i is less than five")',
+          '}',
+          '',
+          '',
+          '// Comment'
+        ]
+      },
+      {
+        a: [
+          'foo',
+          'bar'
+        ],
+        b: [
+          'baz',
+        ]
+      },
+      {
+        ab: [
+          'Bad news: combustible lemons failed.'
+        ]
+      }
+    ];
+    setup(function() {
+      element = fixture('basic');
+      element._maybeRenderDiff({content: diffContent}, [], []);
+      flushAsynchronousOperations();
+
+      elWithComments = fixture('comments');
+      elWithComments._patchNum = 1;
+    });
+
+    test('ab content is the same for left and right sides', function() {
+      for (var i = 0; i < diffContent[0].ab.length; i++) {
+        var leftEls = element.querySelectorAll(
+            '#leftDiffContent .content[data-line-num="' + (i + 1) + '"]');
+        assert.equal(leftEls.length, 1);
+        var rightEls = element.querySelectorAll(
+            '#rightDiffContent .content[data-line-num="' + (i + 1) + '"]');
+        assert.equal(rightEls.length, 1);
+        assert.equal(leftEls[0].textContent, rightEls[0].textContent);
+      }
+    });
+
+    test('all line number and content elements have same (non-zero) height',
+        function() {
+      var els = element.querySelectorAll('.lineNum, .content');
+      assert.isAbove(els.length, 0);
+      var offsetHeight = els.length > 0 && els[0].offsetHeight;
+      assert.isAbove(offsetHeight, 0);
+      for (var i = 0; i < els.length; i++) {
+        assert.equal(offsetHeight, els[i].offsetHeight);
+      }
+    });
+
+    test('content is properly escaped', function() {
+      var firstLineEls = element.querySelectorAll(
+        '#leftDiffContent .content[data-line-num="1"], ' +
+        '#rightDiffContent .content[data-line-num="1"]');
+      assert.equal(2, firstLineEls.length);
+      for (var i = 0; i < firstLineEls.length; i++) {
+        assert.equal(firstLineEls[i].innerHTML,
+            'if i &lt; 5 { // "comments" &amp;= \'fun\' &amp;&amp; true');
+      }
+    });
+
+    test('content and line numbers are correct for a/b edit', function() {
+      assert.equal(element.$$(
+          '#leftDiffContent .content[data-line-num="7"]').textContent, 'foo');
+      assert.equal(element.$$(
+          '#leftDiffContent .content[data-line-num="8"]').textContent, 'bar');
+      assert.equal(element.$$(
+          '#rightDiffContent .content[data-line-num="7"]').textContent, 'baz');
+      assert.equal(element.$$(
+          '#leftDiffContent .content[data-line-num="9"]').textContent,
+          element.$$(
+              '#rightDiffContent .content[data-line-num="8"]').textContent);
+    });
+
+    test('ruler width changes are applied correctly', function() {
+      assert.equal(element.rulerWidth, 0);
+      assert.equal(element.querySelectorAll('.ruler').length, 0);
+      element.rulerWidth = 80;
+      flushAsynchronousOperations();
+      var els = element.querySelectorAll('.ruler');
+      assert.isAbove(els.length, 0);
+      for (var i = 0; i < els.length; i++) {
+        assert.equal(els[i].style.left, '80ch');
+      }
+      element.rulerWidth = 0;
+      flushAsynchronousOperations();
+      assert.equal(element.querySelectorAll('.ruler').length, 0);
+      element.rulerWidth = 100;
+      flushAsynchronousOperations();
+      els = element.querySelectorAll('.ruler');
+      assert.isAbove(els.length, 0);
+      for (var i = 0; i < els.length; i++) {
+        assert.equal(els[i].style.left, '100ch');
+      }
+    });
+
+    test('comment threads are rendered correctly', function() {
+      elWithComments._maybeRenderDiff({content: diffContent}, [], [
+          {
+            id: 'file_comment',
+            message: 'this is a file comment about the meaninglessness of life',
+            author: {
+              name: 'GLaDOS'
+            }
+          },
+          {
+            id: 'all_the_lemons',
+            line: 8,
+            message: 'MAKE LIFE TAKE THE LEMONS BACK',
+            author: {
+              name: 'Cave Johnson',
+            },
+          }
+      ]);
+      flushAsynchronousOperations();
+      var threadEls = elWithComments.querySelectorAll(
+          'gr-diff-comment-thread[data-thread-id="thread-1-8"]');
+      assert.equal(threadEls.length, 1);
+      var fillerEls = elWithComments.querySelectorAll(
+          '.js-threadFiller[data-thread-id="thread-1-8"]');
+      assert.equal(fillerEls.length, 3);
+
+      threadEls = elWithComments.querySelectorAll(
+          'gr-diff-comment-thread[data-thread-id="thread-1-FILE"]');
+      assert.equal(threadEls.length, 1);
+      fillerEls = elWithComments.querySelectorAll(
+          '.js-threadFiller[data-thread-id="thread-1-FILE"]');
+      assert.equal(fillerEls.length, 3);
+    });
+
+  });
+</script>
