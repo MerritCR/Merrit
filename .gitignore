@@ -24,3 +24,6 @@
 *.asc
 /bin/
 *.iml
+*.settings
+*.project
+*.classpath
