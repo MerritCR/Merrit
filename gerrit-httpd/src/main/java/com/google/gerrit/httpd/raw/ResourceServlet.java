@@ -108,8 +108,9 @@ public abstract class ResourceServlet extends HttpServlet {
    *
    * @param pathInfo result of {@link HttpServletRequest#getPathInfo()}.
    * @return path where static content can be found.
+   * @throws IOException if an error occurred resolving the resource.
    */
-  protected abstract Path getResourcePath(String pathInfo);
+  protected abstract Path getResourcePath(String pathInfo) throws IOException;
 
   protected FileTime getLastModifiedTime(Path p) throws IOException {
     return Files.getLastModifiedTime(p);
@@ -135,28 +136,25 @@ public abstract class ResourceServlet extends HttpServlet {
     }
 
     Resource r = cache.getIfPresent(p);
-    if (r == null && maybeStream(p, req, rsp)) {
+    try {
+      if (r == null) {
+        if (maybeStream(p, req, rsp)) {
+          return; // Bypass cache for large resource.
+        }
+        r = cache.get(p, newLoader(p));
+      }
+      if (refresh && r.isStale(p, this)) {
+        cache.invalidate(p);
+        r = cache.get(p, newLoader(p));
+      }
+    } catch (ExecutionException e) {
+      log.warn("Cannot load static resource " + req.getPathInfo(), e);
+      CacheHeaders.setNotCacheable(rsp);
+      rsp.setStatus(SC_INTERNAL_SERVER_ERROR);
       return;
     }
-
-    if (r == null) {
-      Callable<Resource> loader = newLoader(p);
-      try {
-        r = cache.get(p, loader);
-        if (refresh && r.isStale(p, this)) {
-          cache.invalidate(p);
-          r = cache.get(p, loader);
-        }
-      } catch (ExecutionException | IOException e) {
-        log.warn("Cannot load static resource " + req.getPathInfo(), e);
-        CacheHeaders.setNotCacheable(rsp);
-        rsp.setStatus(SC_INTERNAL_SERVER_ERROR);
-        return;
-      }
-    }
-
     if (r == Resource.NOT_FOUND) {
-      notFound(rsp);
+      notFound(rsp); // Cached not found response.
       return;
     }
 
@@ -198,7 +196,7 @@ public abstract class ResourceServlet extends HttpServlet {
     try {
       Path p = getResourcePath(name);
       return cache.get(p, newLoader(p));
-    } catch (ExecutionException e) {
+    } catch (ExecutionException | IOException e) {
       log.warn(String.format("Cannot load static resource %s", name), e);
       return null;
     }

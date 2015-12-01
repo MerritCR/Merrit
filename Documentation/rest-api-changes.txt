@@ -224,7 +224,7 @@ default. Optional fields are:
 * `ALL_REVISIONS`: describe all revisions, not just current.
 --
 
-[[download_commands]]
+[[download-commands]]
 --
 * `DOWNLOAD_COMMANDS`: include the `commands` field in the
   link:#fetch-info[FetchInfo] for revisions. Only valid when the
@@ -1104,7 +1104,7 @@ message is contained in the response body.
   blocked by Verified
 ----
 
-[[submitted_together]]
+[[submitted-together]]
 === Changes submitted together
 --
 'GET /changes/link:#change-id[\{change-id\}]/submitted_together'
@@ -2257,6 +2257,55 @@ Deletes a reviewer from a change.
 .Request
 ----
   DELETE /changes/myProject~master~I8473b95934b5732ac55d26311a706c9c2bde9940/reviewers/John%20Doe HTTP/1.0
+----
+
+.Response
+----
+  HTTP/1.1 204 No Content
+----
+
+[[list-votes]]
+=== List Votes
+--
+'GET /changes/link:#change-id[\{change-id\}]/reviewers/link:rest-api-accounts.html#account-id[\{account-id\}]/votes/'
+--
+
+Lists the votes for a specific reviewer of the change.
+
+.Request
+----
+  GET /changes/myProject~master~I8473b95934b5732ac55d26311a706c9c2bde9940/revisions/674ac754f91e64a0efb8087e59a176484bd534d1/files/ HTTP/1.0
+----
+
+As result a map is returned that maps the label name to the label value.
+The entries in the map are sorted by label name.
+
+.Response
+----
+  HTTP/1.1 200 OK
+  Content-Disposition: attachment
+  Content-Type: application/json;charset=UTF-8
+
+  )]}'
+  {
+    "Code-Review": -1,
+    "Verified": 1
+    "Work-In-Progress": 1,
+  }
+----
+
+[[delete-vote]]
+=== Delete Vote
+--
+'DELETE /changes/link:#change-id[\{change-id\}]/reviewers/link:rest-api-accounts.html#account-id[\{account-id\}]/votes/link:#label-id[\{label-id\}]'
+--
+
+Deletes a single vote from a change. Note, that even when the last vote of
+a reviewer is removed the reviewer itself is still listed on the change.
+
+.Request
+----
+  DELETE /changes/myProject~master~I8473b95934b5732ac55d26311a706c9c2bde9940/reviewers/John%20Doe/votes/Code-Review HTTP/1.0
 ----
 
 .Response
@@ -3747,6 +3796,10 @@ UUID of a published comment.
 === \{draft-id\}
 UUID of a draft comment.
 
+[[label-id]]
+=== \{label-id\}
+The name of the label.
+
 [[file-id]]
 \{file-id\}
 ~~~~~~~~~~~~
@@ -4254,7 +4307,7 @@ set via a certain protocol.
 |`commands`    |optional|
 The download commands for this patch set as a map that maps the command
 names to the commands. +
-Only set if link:#download_commands[download commands] are requested.
+Only set if link:#download-commands[download commands] are requested.
 |==========================
 
 [[file-info]]

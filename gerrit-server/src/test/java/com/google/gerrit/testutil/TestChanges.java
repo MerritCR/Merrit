@@ -102,12 +102,13 @@ public class TestChanges {
       GitRepositoryManager repoManager, NotesMigration migration,
       Change c, AllUsersNameProvider allUsers,
       IdentifiedUser user) throws OrmException {
-    ChangeControl ctl = EasyMock.createNiceMock(ChangeControl.class);
+    ChangeControl ctl = EasyMock.createMock(ChangeControl.class);
     expect(ctl.getChange()).andStubReturn(c);
     expect(ctl.getUser()).andStubReturn(user);
     ChangeNotes notes = new ChangeNotes(repoManager, migration, allUsers, c)
         .load();
     expect(ctl.getNotes()).andStubReturn(notes);
+    expect(ctl.getId()).andStubReturn(c.getId());
     EasyMock.replay(ctl);
     return ctl;
   }
