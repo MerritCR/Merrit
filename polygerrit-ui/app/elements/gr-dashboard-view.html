@@ -16,42 +16,41 @@ limitations under the License.
 
 <link rel="import" href="../bower_components/polymer/polymer.html">
 
-<dom-module id="gr-account-manager">
+<dom-module id="gr-dashboard-view">
   <template>
     <iron-ajax id="xhr"
         auto
-        url="/accounts/self/detail"
-        json-prefix=")]}'"></iron-ajax>
+        url="/changes/"
+        params="[[_computeQueryParams()]]"
+        last-response="{{_results}}"
+        json-prefix=")]}'"
+        debounce-duration="300"></iron-ajax>
   </template>
   <script>
   (function() {
     'use strict';
 
     Polymer({
-      is: 'gr-account-manager',
-
-      hostAttributes: {
-        hidden: true
-      },
+      is: 'gr-dashboard-view',
 
       properties: {
-        account: {
-          type: Object,
-          notify: true,
-        },
+        _results: Array,
       },
 
-      listeners: {
-        'xhr.response': '_handleResponse',
-        'xhr.error': '_handleResponse',
-      },
-
-      _handleResponse: function(e, req) {
-        if (req.status >= 200 && req.status < 300) {
-          this.account = req.response;
-        } else {
-          this.account = {};
-        }
+      _computeQueryParams: function() {
+        var options = Changes.listChangesOptionsToHex(
+            Changes.ListChangesOption.LABELS,
+            Changes.ListChangesOption.DETAILED_ACCOUNTS,
+            Changes.ListChangesOption.REVIEWED
+        );
+        return {
+          O: options,
+          q: [
+            'is:open owner:self',
+            'is:open reviewer:self -owner:self',
+            'is:closed (owner:self OR reviewer:self) -age:4w limit:10',
+          ],
+        };
       },
 
     });
