@@ -1,0 +1,52 @@
+{
+  "name": "gerrit-ng-ui",
+  "description": "Set up to use ES6(2015) using Babel.",
+  "version": "5.1.0",
+  "author": "Joshua Wilson <josh@redhat.com>",
+  "bugs": {
+    "url": "https://github.com/MerritCR/merrit"
+  },
+  "dependencies": {
+    "extract-text-webpack-plugin": "0.9.1",
+    "find-root": "0.1.1",
+    "lodash.assign": "3.2.0",
+    "lodash.defaults": "3.1.2",
+    "lodash.pick": "3.1.0",
+    "rimraf": "^2.4.4"
+  },
+  "devDependencies": {
+    "precommit-hook": "^3.0.0",
+    "standard": "5.4.1",
+    "webpack": "^1.12.9",
+    "webpack-dev-server": "^1.14.0"
+  },
+  "homepage": "https://github.com/MerritCR/merrit",
+  "keywords": [
+    "config",
+    "human javascript",
+    "webpack"
+  ],
+  "license": "MIT",
+  "main": "index.js",
+  "peerDependencies": {
+    "webpack-dev-server": "*"
+  },
+  "pre-commit": [
+    "lint",
+    "validate"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/MerritCR/merrit"
+  },
+  "scripts": {
+    "lint": "standard",
+    "validate": "npm ls"
+  },
+  "standard": {
+    "ignore": [
+      "examples/*/public/*",
+      "examples/*/node_modules/*"
+    ]
+  }
+}
