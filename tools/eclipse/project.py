@@ -76,7 +76,7 @@ def gen_plugin_classpath(root):
     if path.exists(path.join(root, 'src', 'test', 'java')):
       testpath = """
   <classpathentry kind="src" path="src/test/java"\
- out="buck-out/eclipse/test"/>"""
+ out="eclipse-out/test"/>"""
     else:
       testpath = ""
     print("""\
@@ -85,7 +85,7 @@ def gen_plugin_classpath(root):
   <classpathentry kind="src" path="src/main/java"/>%(testpath)s
   <classpathentry kind="con" path="org.eclipse.jdt.launching.JRE_CONTAINER"/>
   <classpathentry combineaccessrules="false" kind="src" path="/gerrit"/>
-  <classpathentry kind="output" path="buck-out/eclipse/classes"/>
+  <classpathentry kind="output" path="eclipse-out/classes"/>
 </classpath>""" % {"testpath": testpath}, file=fd)
 
 def gen_classpath():
@@ -119,7 +119,7 @@ def gen_classpath():
       gwt_lib.add(p)
       continue
 
-    if p.startswith('buck-out/gen/lib/gwt/'):
+    if 'buck-out/gen/lib/gwt/' in p:
       # gwt_module() depends on huge shaded GWT JARs that import
       # incorrect versions of classes for Gerrit. Collect into
       # a private grouping for later use.
@@ -141,12 +141,12 @@ def gen_classpath():
     out = None
 
     if s.startswith('lib/'):
-      out = 'buck-out/eclipse/lib'
+      out = 'eclipse-out/lib'
     elif s.startswith('plugins/'):
       if args.plugins:
         plugins.add(s)
         continue
-      out = 'buck-out/eclipse/' + s
+      out = 'eclipse-out/' + s
 
     p = path.join(s, 'java')
     if path.exists(p):
@@ -158,14 +158,14 @@ def gen_classpath():
       if out:
         o = out + '/' + env
       elif env == 'test':
-        o = 'buck-out/eclipse/test'
+        o = 'eclipse-out/test'
 
       for srctype in ['java', 'resources']:
         p = path.join(s, 'src', env, srctype)
         if path.exists(p):
           classpathentry('src', p, out=o)
 
-  for libs in [gwt_lib, lib]:
+  for libs in [lib, gwt_lib]:
     for j in sorted(libs):
       s = None
       if j.endswith('.jar'):
@@ -179,10 +179,10 @@ def gen_classpath():
   for s in sorted(gwt_src):
     p = path.join(ROOT, s, 'src', 'main', 'java')
     if path.exists(p):
-      classpathentry('lib', p, out='buck-out/eclipse/gwtsrc')
+      classpathentry('lib', p, out='eclipse-out/gwtsrc')
 
   classpathentry('con', JRE)
-  classpathentry('output', 'buck-out/eclipse/classes')
+  classpathentry('output', 'eclipse-out/classes')
 
   p = path.join(ROOT, '.classpath')
   with open(p, 'w') as fd:
