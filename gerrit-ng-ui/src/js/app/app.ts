@@ -6,7 +6,7 @@ import {bootstrap, Component} from 'angular2/angular2';
 })
 
 class AppComponent {
-  public title = 'Welcome the Gerrit Angular 2 UI';
+  public title = 'The new Gerrit done in Angular 2 with TypeScript';
 }
 
 bootstrap(AppComponent);
