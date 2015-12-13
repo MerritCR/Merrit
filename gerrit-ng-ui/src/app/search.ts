@@ -5,16 +5,19 @@ import {bootstrap, Component} from 'angular2/angular2';
 
 
 @Component({
-    selector: 'my-app',
+    selector: 'search',
     template:`
         <input type="text">
-        <button aria-label="Search"></button>
+        <button (click)="onClickSubmit()" aria-label="Search"></button>
     `,
     directives:[]
 })
 
-class AppComponent {
+class SearchComponent {
     public searchText: search;
+    public onClickSubmit(){
+        alert('add connection to search api')
+    }
 }
 
-bootstrap(AppComponent);
+bootstrap(SearchComponent);
