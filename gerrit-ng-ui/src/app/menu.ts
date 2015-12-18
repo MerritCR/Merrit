@@ -17,7 +17,7 @@ import {bootstrap, Component} from 'angular2/angular2';
 })
 
 class MenuComponent {
-    public menuName: search;
+    public menuName='menu-title';
     public onClick(){
         alert('add code')
     }
