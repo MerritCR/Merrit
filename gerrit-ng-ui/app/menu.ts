@@ -4,7 +4,8 @@
 /**
  * Created by josh on 12/12/15.
  */
-import {bootstrap, Component} from 'angular2/angular2';
+import {Component} from 'angular2/core';
+import {Search} from './search'
 
 @Component({
     selector: 'menu',
@@ -13,14 +14,12 @@ import {bootstrap, Component} from 'angular2/angular2';
             {{menuName}}
         </div>
     `,
-    directives:[]
+    directives:[Search]
 })
 
-class MenuComponent {
+export class Menu {
     public menuName='menu-title';
     public onClick(){
         alert('add code')
     }
 }
-
-bootstrap(MenuComponent);

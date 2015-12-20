@@ -1,8 +1,7 @@
 /**
  * Created by josh on 12/12/15.
  */
-import {bootstrap, Component} from 'angular2/angular2';
-
+import {Component} from 'angular2/core';
 
 @Component({
     selector: 'search',
@@ -13,11 +12,9 @@ import {bootstrap, Component} from 'angular2/angular2';
     directives:[]
 })
 
-class SearchComponent {
-    public searchText: search;
+export class Search {
+    //public searchText: search;
     public onClickSubmit(){
         alert('add connection to search api')
     }
 }
-
-bootstrap(SearchComponent);
