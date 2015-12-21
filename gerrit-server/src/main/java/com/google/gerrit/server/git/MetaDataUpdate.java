@@ -34,7 +34,7 @@ import org.eclipse.jgit.lib.Repository;
 import java.io.IOException;
 
 /** Helps with the updating of a {@link VersionedMetaData}. */
-public class MetaDataUpdate {
+public class MetaDataUpdate implements AutoCloseable {
   public static class User {
     private final InternalFactory factory;
     private final GitRepositoryManager mgr;
@@ -88,6 +88,33 @@ public class MetaDataUpdate {
      * This allows batching together updates to multiple metadata refs. For making
      * multiple commits to a single metadata ref, see
      * {@link VersionedMetaData#openUpdate(MetaDataUpdate)}.
+     *
+     * Important: Create a new MetaDataUpdate instance for each update:
+     * <pre>
+     * <code>
+     *   try (Repository repo = repoMgr.openRepository(allUsersName);
+     *       RevWalk rw = new RevWalk(repo) {
+     *     BatchRefUpdate batchUpdate = repo.getRefDatabase().newBatchUpdate();
+     *     // WRONG: create the MetaDataUpdate instance here and reuse it for
+     *     //        all updates in the loop
+     *     for{@code (Map.Entry<Account.Id, DiffPreferencesInfo> e : diffPrefsFromDb)} {
+     *       // CORRECT: create a new MetaDataUpdate instance for each update
+     *       try (MetaDataUpdate md =
+     *           metaDataUpdateFactory.create(allUsersName, batchUpdate)) {
+     *         md.setMessage("Import diff preferences from reviewdb\n");
+     *         VersionedAccountPreferences vPrefs =
+     *             VersionedAccountPreferences.forUser(e.getKey());
+     *         storeSection(vPrefs.getConfig(), UserConfigSections.DIFF, null,
+     *             e.getValue(), DiffPreferencesInfo.defaults());
+     *         vPrefs.commit(md);
+     *       } catch (ConfigInvalidException e) {
+     *         // TODO handle exception
+     *       }
+     *     }
+     *     batchUpdate.execute(rw, NullProgressMonitor.INSTANCE);
+     *   }
+     * </code>
+     * </pre>
      *
      * @param name project name.
      * @param repository GIT respository
@@ -191,6 +218,7 @@ public class MetaDataUpdate {
   }
 
   /** Close the cached Repository handle. */
+  @Override
   public void close() {
     getRepository().close();
   }

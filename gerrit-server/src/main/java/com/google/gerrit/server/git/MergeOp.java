@@ -16,15 +16,14 @@ package com.google.gerrit.server.git;
 
 import static com.google.common.base.Preconditions.checkState;
 import static com.google.gerrit.server.notedb.ReviewerStateInternal.REVIEWER;
-import static org.eclipse.jgit.lib.RefDatabase.ALL;
 
+import com.google.auto.value.AutoValue;
 import com.google.common.base.Optional;
 import com.google.common.base.Predicate;
-import com.google.common.collect.ArrayListMultimap;
 import com.google.common.collect.HashBasedTable;
+import com.google.common.collect.HashMultimap;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Iterables;
-import com.google.common.collect.ListMultimap;
 import com.google.common.collect.Maps;
 import com.google.common.collect.Multimap;
 import com.google.common.collect.Table;
@@ -392,8 +391,7 @@ public class MergeOp {
       throws IntegrationException, NoSuchChangeException,
       ResourceConflictException {
     logDebug("Beginning merge attempt on {}", cs);
-    Map<Branch.NameKey, ListMultimap<SubmitType, ChangeData>> toSubmit =
-        new HashMap<>();
+    Map<Branch.NameKey, BranchBatch> toSubmit = new HashMap<>();
     logDebug("Perform the merges");
     try {
       Multimap<Project.NameKey, Branch.NameKey> br = cs.branchesByProject();
@@ -402,22 +400,15 @@ public class MergeOp {
         openRepository(project);
         for (Branch.NameKey branch : br.get(project)) {
           setDestProject(branch);
-
-          ListMultimap<SubmitType, ChangeData> submitting =
-              validateChangeList(cbb.get(branch));
+          BranchBatch submitting = validateChangeList(cbb.get(branch));
           toSubmit.put(branch, submitting);
 
-          Set<SubmitType> submitTypes = new HashSet<>(submitting.keySet());
-          for (SubmitType submitType : submitTypes) {
-            SubmitStrategy strategy = createStrategy(branch, submitType,
-                getBranchTip(branch), caller);
-
-            MergeTip mergeTip = preMerge(strategy, submitting.get(submitType),
-                getBranchTip(branch));
-            mergeTips.put(branch, mergeTip);
-            updateChangeStatus(submitting.get(submitType), branch,
-                true, caller);
-          }
+          SubmitStrategy strategy = createStrategy(
+              branch, submitting.submitType(), getBranchTip(branch), caller);
+          MergeTip mergeTip = preMerge(strategy, submitting.changes(),
+              getBranchTip(branch));
+          mergeTips.put(branch, mergeTip);
+          updateChangeStatus(submitting.changes(), branch, true, caller);
           inserter.flush();
         }
         closeRepository();
@@ -431,12 +422,9 @@ public class MergeOp {
           pendingRefUpdates.remove(branch);
 
           setDestProject(branch);
-          ListMultimap<SubmitType, ChangeData> submitting = toSubmit.get(branch);
-          for (SubmitType submitType : submitting.keySet()) {
-            updateChangeStatus(submitting.get(submitType), branch,
-                false, caller);
-            updateSubmoduleSubscriptions(subOp, branch, getBranchTip(branch));
-          }
+          BranchBatch submitting = toSubmit.get(branch);
+          updateChangeStatus(submitting.changes(), branch, false, caller);
+          updateSubmoduleSubscriptions(subOp, branch, getBranchTip(branch));
           if (update != null) {
             fireRefUpdated(branch, update);
           }
@@ -583,30 +571,26 @@ public class MergeOp {
     return alreadyAccepted;
   }
 
-  private ListMultimap<SubmitType, ChangeData> validateChangeList(
+  @AutoValue
+  static abstract class BranchBatch {
+    abstract SubmitType submitType();
+    abstract List<ChangeData> changes();
+  }
+
+  private BranchBatch validateChangeList(
       Collection<ChangeData> submitted) throws IntegrationException {
     logDebug("Validating {} changes", submitted.size());
-    ListMultimap<SubmitType, ChangeData> toSubmit = ArrayListMultimap.create();
+    List<ChangeData> toSubmit = new ArrayList<>(submitted.size());
+    Multimap<ObjectId, PatchSet.Id> revisions = getRevisions(submitted);
 
-    Map<String, Ref> allRefs;
-    try {
-      allRefs = repo.getRefDatabase().getRefs(ALL);
-    } catch (IOException e) {
-      throw new IntegrationException(e.getMessage(), e);
-    }
-
-    Set<ObjectId> tips = new HashSet<>();
-    for (Ref r : allRefs.values()) {
-      tips.add(r.getObjectId());
-    }
-
+    SubmitType submitType = null;
+    ChangeData choseSubmitTypeFrom = null;
     for (ChangeData cd : submitted) {
       ChangeControl ctl;
       Change chg;
       try {
         ctl = cd.changeControl();
-        // Reload change in case index was stale.
-        chg = cd.reloadChange();
+        chg = cd.change();
       } catch (OrmException e) {
         throw new IntegrationException("Failed to validate changes", e);
       }
@@ -645,18 +629,13 @@ public class MergeOp {
         continue;
       }
 
-      if (!tips.contains(id)) {
-        // TODO Technically the proper way to do this test is to use a
-        // RevWalk on "$id --not --all" and test for an empty set. But
-        // that is way slower than looking for a ref directly pointing
-        // at the desired tip. We should always have a ref available.
-        //
+      if (!revisions.containsEntry(id, ps.getId())) {
         // TODO this is actually an error, the branch is gone but we
         // want to merge the issue. We can't safely do that if the
         // tip is not reachable.
         //
         logError("Revision " + idstr + " of patch set " + ps.getId()
-            + " is not contained in any ref");
+            + " does not match " + ps.getId().toRefName());
         commits.put(changeId, CodeReviewCommit.revisionGone(ctl));
         continue;
       }
@@ -686,20 +665,52 @@ public class MergeOp {
         continue;
       }
 
-      SubmitType submitType;
-      submitType = getSubmitType(commit.getControl(), ps);
-      if (submitType == null) {
+      SubmitType st = getSubmitType(commit.getControl(), ps);
+      if (st == null) {
         logError("No submit type for revision " + idstr + " of patch set "
             + ps.getId());
-        commit.setStatusCode(CommitMergeStatus.NO_SUBMIT_TYPE);
-        continue;
+        throw new IntegrationException(
+            "No submit type for change " + cd.getId());
       }
-
+      if (submitType == null) {
+        submitType = st;
+        choseSubmitTypeFrom = cd;
+      } else if (st != submitType) {
+        throw new IntegrationException(String.format(
+            "Change %s has submit type %s, but previously chose submit type %s "
+            + "from change %s in the same batch",
+            cd.getId(), st, submitType, choseSubmitTypeFrom.getId()));
+      }
       commit.add(canMergeFlag);
-      toSubmit.put(submitType, cd);
+      toSubmit.add(cd);
     }
     logDebug("Submitting on this run: {}", toSubmit);
-    return toSubmit;
+    return new AutoValue_MergeOp_BranchBatch(submitType, toSubmit);
+  }
+
+  private Multimap<ObjectId, PatchSet.Id> getRevisions(
+      Collection<ChangeData> cds) throws IntegrationException {
+    try {
+      List<String> refNames = new ArrayList<>(cds.size());
+      for (ChangeData cd : cds) {
+        // Reload change in case index was stale.
+        cd.reloadChange();
+        Change c = cd.change();
+        if (c != null) {
+          refNames.add(c.currentPatchSetId().toRefName());
+        }
+      }
+      Multimap<ObjectId, PatchSet.Id> revisions =
+          HashMultimap.create(cds.size(), 1);
+      for (Map.Entry<String, Ref> e : repo.getRefDatabase().exactRef(
+          refNames.toArray(new String[refNames.size()])).entrySet()) {
+        revisions.put(
+            e.getValue().getObjectId(), PatchSet.Id.fromRef(e.getKey()));
+      }
+      return revisions;
+    } catch (IOException | OrmException e) {
+      throw new IntegrationException("Failed to validate changes", e);
+    }
   }
 
   private SubmitType getSubmitType(ChangeControl ctl, PatchSet ps) {
