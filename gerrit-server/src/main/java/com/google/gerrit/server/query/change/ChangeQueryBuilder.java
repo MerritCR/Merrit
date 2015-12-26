@@ -48,7 +48,7 @@ import com.google.gerrit.server.config.AllUsersNameProvider;
 import com.google.gerrit.server.config.GerritServerConfig;
 import com.google.gerrit.server.config.TrackingFooters;
 import com.google.gerrit.server.git.GitRepositoryManager;
-import com.google.gerrit.server.git.strategy.SubmitStrategyFactory;
+import com.google.gerrit.server.git.strategy.SubmitDryRun;
 import com.google.gerrit.server.group.ListMembers;
 import com.google.gerrit.server.index.ChangeIndex;
 import com.google.gerrit.server.index.FieldDef;
@@ -171,7 +171,7 @@ public class ChangeQueryBuilder extends QueryBuilder<ChangeData> {
     final GitRepositoryManager repoManager;
     final ProjectCache projectCache;
     final Provider<ListChildProjects> listChildProjects;
-    final SubmitStrategyFactory submitStrategyFactory;
+    final SubmitDryRun submitDryRun;
     final ConflictsCache conflictsCache;
     final TrackingFooters trackingFooters;
     final ChangeIndex index;
@@ -203,7 +203,7 @@ public class ChangeQueryBuilder extends QueryBuilder<ChangeData> {
         ProjectCache projectCache,
         Provider<ListChildProjects> listChildProjects,
         IndexCollection indexes,
-        SubmitStrategyFactory submitStrategyFactory,
+        SubmitDryRun submitDryRun,
         ConflictsCache conflictsCache,
         TrackingFooters trackingFooters,
         IndexConfig indexConfig,
@@ -213,7 +213,7 @@ public class ChangeQueryBuilder extends QueryBuilder<ChangeData> {
           capabilityControlFactory, changeControlGenericFactory,
           changeDataFactory, fillArgs, plcUtil, accountResolver, groupBackend,
           allProjectsName, allUsersName, patchListCache, repoManager,
-          projectCache, listChildProjects, submitStrategyFactory,
+          projectCache, listChildProjects, submitDryRun,
           conflictsCache, trackingFooters,
           indexes != null ? indexes.getSearchIndex() : null,
           indexConfig, listMembers,
@@ -240,7 +240,7 @@ public class ChangeQueryBuilder extends QueryBuilder<ChangeData> {
         GitRepositoryManager repoManager,
         ProjectCache projectCache,
         Provider<ListChildProjects> listChildProjects,
-        SubmitStrategyFactory submitStrategyFactory,
+        SubmitDryRun submitDryRun,
         ConflictsCache conflictsCache,
         TrackingFooters trackingFooters,
         ChangeIndex index,
@@ -266,7 +266,7 @@ public class ChangeQueryBuilder extends QueryBuilder<ChangeData> {
      this.repoManager = repoManager;
      this.projectCache = projectCache;
      this.listChildProjects = listChildProjects;
-     this.submitStrategyFactory = submitStrategyFactory;
+     this.submitDryRun = submitDryRun;
      this.conflictsCache = conflictsCache;
      this.trackingFooters = trackingFooters;
      this.index = index;
@@ -281,7 +281,7 @@ public class ChangeQueryBuilder extends QueryBuilder<ChangeData> {
           capabilityControlFactory, changeControlGenericFactory,
           changeDataFactory, fillArgs, plcUtil, accountResolver, groupBackend,
           allProjectsName, allUsersName, patchListCache, repoManager,
-          projectCache, listChildProjects, submitStrategyFactory,
+          projectCache, listChildProjects, submitDryRun,
           conflictsCache, trackingFooters, index, indexConfig, listMembers,
           allowsDrafts);
     }
@@ -379,8 +379,7 @@ public class ChangeQueryBuilder extends QueryBuilder<ChangeData> {
   @Operator
   public Predicate<ChangeData> change(String query) throws QueryParseException {
     if (PAT_LEGACY_ID.matcher(query).matches()) {
-      return new LegacyChangeIdPredicate(
-          args.getSchema(), Change.Id.parse(query));
+      return new LegacyChangeIdPredicate(Change.Id.parse(query));
     } else if (PAT_CHANGE_ID.matcher(query).matches()) {
       return new ChangeIdPredicate(parseChangeId(query));
     }
@@ -403,7 +402,7 @@ public class ChangeQueryBuilder extends QueryBuilder<ChangeData> {
   @Operator
   public Predicate<ChangeData> status(String statusName) {
     if ("reviewed".equalsIgnoreCase(statusName)) {
-      return IsReviewedPredicate.create(args.getSchema());
+      return IsReviewedPredicate.create();
     } else {
       return ChangeStatusPredicate.parse(statusName);
     }
@@ -444,7 +443,7 @@ public class ChangeQueryBuilder extends QueryBuilder<ChangeData> {
     }
 
     if ("reviewed".equalsIgnoreCase(value)) {
-      return IsReviewedPredicate.create(args.getSchema());
+      return IsReviewedPredicate.create();
     }
 
     if ("owner".equalsIgnoreCase(value)) {
@@ -518,18 +517,18 @@ public class ChangeQueryBuilder extends QueryBuilder<ChangeData> {
 
   @Operator
   public Predicate<ChangeData> topic(String name) {
-    return new ExactTopicPredicate(args.getSchema(), name);
+    return new ExactTopicPredicate(name);
   }
 
   @Operator
   public Predicate<ChangeData> intopic(String name) {
     if (name.startsWith("^")) {
-      return new RegexTopicPredicate(args.getSchema(), name);
+      return new RegexTopicPredicate(name);
     }
     if (name.isEmpty()) {
-      return new ExactTopicPredicate(args.getSchema(), name);
+      return new ExactTopicPredicate(name);
     }
-    return new FuzzyTopicPredicate(args.getSchema(), name, args.index);
+    return new FuzzyTopicPredicate(name, args.index);
   }
 
   @Operator
@@ -870,7 +869,7 @@ public class ChangeQueryBuilder extends QueryBuilder<ChangeData> {
   @Operator
   public Predicate<ChangeData> reviewedby(String who)
       throws QueryParseException, OrmException {
-    return IsReviewedPredicate.create(args.getSchema(), parseAccount(who));
+    return IsReviewedPredicate.create(parseAccount(who));
   }
 
   @Operator

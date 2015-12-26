@@ -19,6 +19,7 @@ limitations under the License.
 <link rel="import" href="gr-ajax.html">
 <link rel="import" href="gr-date-formatter.html">
 <link rel="import" href="gr-file-list.html">
+<link rel="import" href="gr-linked-text.html">
 <link rel="import" href="gr-messages-list.html">
 <link rel="import" href="gr-reply-dropdown.html">
 
@@ -90,7 +91,6 @@ limitations under the License.
         border-bottom: 1px solid #ddd;
         font-family: 'Source Code Pro', Menlo, 'Lucida Console', Monaco, monospace;
         overflow-x: auto;
-        white-space: pre-wrap;
       }
       gr-file-list {
         padding: 0 var(--default-horizontal-margin) 10px;
@@ -175,7 +175,9 @@ limitations under the License.
           </tr>
         </table>
       </section>
-      <section class="summary">[[_commitInfo.message]]</section>
+      <section class="summary">
+        <gr-linked-text pre content="[[_commitInfo.message]]"></gr-linked-text>
+      </section>
       <gr-file-list id="fileList"
           change-num="[[_changeNum]]"
           patch-num="[[_patchNum]]"
@@ -291,8 +293,6 @@ limitations under the License.
         this._changeNum = value.changeNum;
         this._patchNum = value.patchNum;
         if (!this._changeNum) {
-          this._change = null;
-          this._comments = null;
           return;
         }
         this._reload();
