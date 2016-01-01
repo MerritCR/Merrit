@@ -8,8 +8,7 @@ import {Component} from 'angular2/core';
     template:`
         <input type="text">
         <button (click)="onClickSubmit()" aria-label="Search"></button>
-    `,
-    directives:[]
+    `
 })
 
 export class Search {

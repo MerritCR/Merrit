@@ -5,13 +5,12 @@ import {Component} from 'angular2/core';
 import {Menu} from './menu'
 
 @Component({
-    selector: 'header',
+    selector: 'header-component',
     template:`
         <menu></menu>
-    `,
-    directives:[Menu]
+    `
 })
 
-export class Header {
+export class HeaderComponent {
 
 }
