@@ -8,7 +8,9 @@ import {Menu} from './menu'
     selector: 'header-component',
     template:`
         <menu></menu>
-    `
+        <h1>Main page for Gerrit review.</h1>
+    `,
+    directives: [Menu]
 })
 
 export class HeaderComponent {

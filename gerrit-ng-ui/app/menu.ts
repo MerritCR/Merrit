@@ -13,7 +13,9 @@ import {Search} from './search'
         <div (click)='onClick()'>
             {{menuName}}
         </div>
-    `
+        <search></search>
+    `,
+    directives: [Search]
 })
 
 export class Menu {
