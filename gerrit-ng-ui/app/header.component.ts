@@ -7,6 +7,7 @@ import {Menu} from './menu'
 @Component({
     selector: 'header-component',
     template:`
+        <img src="./img/Eclipse-logo-2014.svg">
         <menu></menu>
         <h1>Main page for Gerrit review.</h1>
     `,
