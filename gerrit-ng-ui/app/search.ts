@@ -10,7 +10,6 @@ import {Component} from 'angular2/core';
         <button (click)="onClickSubmit()" aria-label="Search"></button>
     `
 })
-
 export class Search {
     //public searchText: search;
     public onClickSubmit(){
