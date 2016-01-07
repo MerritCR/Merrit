@@ -50,6 +50,14 @@ limitations under the License.
     .textareaContainer {
       position: relative;
     }
+    iron-autogrow-textarea {
+      padding: 0;
+    }
+    /* https://github.com/PolymerElements/iron-autogrow-textarea/pull/61 */
+    iron-autogrow-textarea::shadow #mirror,
+    iron-autogrow-textarea::shadow textarea {
+      white-space: pre-wrap;
+    }
     .message {
       border: none;
     }
@@ -281,7 +289,7 @@ limitations under the License.
         }
         this.disabled = true;
         this._send(obj).then(function(req) {
-          this.fire('send', {bubbles: false});
+          this.fire('send', null, {bubbles: false});
           this._draft = '';
           this.disabled = false;
           this.$.dropdown.close();

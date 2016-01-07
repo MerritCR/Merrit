@@ -22,6 +22,7 @@ limitations under the License.
 <link rel="import" href="gr-linked-text.html">
 <link rel="import" href="gr-messages-list.html">
 <link rel="import" href="gr-reply-dropdown.html">
+<link rel="import" href="gr-reviewer-list.html">
 
 <dom-module id="gr-change-view">
   <template>
@@ -68,12 +69,19 @@ limitations under the License.
       .header gr-reply-dropdown {
         margin-left: var(--default-horizontal-margin);
       }
+      .changeStatus {
+        color: #999;
+        text-transform: capitalize;
+      }
       section {
         margin: 10px 0;
         padding: 10px var(--default-horizontal-margin);
       }
-      section:first-of-type {
+      /* Strong specificity here is needed due to
+         https://github.com/Polymer/polymer/issues/2531 */
+      .container section.changeInfo {
         margin-top: 0;
+        padding-top: 0;
       }
       table {
         border-collapse: collapse;
@@ -82,14 +90,32 @@ limitations under the License.
         padding: 2px 5px;
         vertical-align: top;
       }
+      gr-reviewer-list {
+        min-width: 25em;
+      }
       .changeInfo-label {
         font-weight: bold;
         text-align: right;
       }
+      .labelValue:not(:first-of-type) {
+        margin-top: .25em;
+      }
+      .labelValue .approved,
+      .labelValue .notApproved {
+        display: inline-block;
+        padding: .1em .3em;
+        border-radius: 3px;
+      }
+      .approved {
+        background-color: #d4ffd4;
+      }
+      .notApproved {
+        background-color: #ffd4d4;
+      }
       .summary {
         border-top: 1px solid #ddd;
         border-bottom: 1px solid #ddd;
-        font-family: 'Source Code Pro', Menlo, 'Lucida Console', Monaco, monospace;
+        font-family: var(--monospace-font-family);
         overflow-x: auto;
       }
       gr-file-list {
@@ -119,6 +145,7 @@ limitations under the License.
           <h2>
             <a href$="[[_computeChangePath(_change._number)]]">[[_change._number]]</a><span>:</span>
             <span>[[_change.subject]]</span>
+            <span class="changeStatus">[[_computeChangeStatus(_change.status)]]</span>
           </h2>
           <label class="patchSelectLabel" for="patchSetSelect">Patch set</label>
           <select id="patchSetSelect" on-change="_handlePatchChange">
@@ -143,16 +170,20 @@ limitations under the License.
         <table>
           <tr>
             <td class="changeInfo-label">Owner</td>
-            <td>[[_change.owner.name]]</td>
+            <td>
+              <span>[[_change.owner.name]]</span>
+              <span hidden$="[[!_change.owner.email]]">
+                (<span>[[_change.owner.email]]</span>)
+              </span>
+            </td>
           </tr>
           <tr>
             <td class="changeInfo-label">Reviewers</td>
             <td>
-              <template is="dom-repeat"
-                        items="[[_computeReviewers(_change.labels, _change.owner)]]"
-                        as="reviewer">
-                <div>[[reviewer.name]]</div>
-              </template>
+              <gr-reviewer-list
+                  change="[[_change]]"
+                  mutable="[[_loggedIn]]"
+                  suggest-from="[[serverConfig.suggest.from]]"></gr-reviewer-list>
             </td>
           </tr>
           <tr>
@@ -178,6 +209,25 @@ limitations under the License.
                   date-str="[[_change.updated]]"></gr-date-formatter>
             </td>
           </tr>
+          <template is="dom-repeat"
+              items="[[_computeLabelNames(_change.labels)]]" as="labelName">
+            <tr>
+              <td class="changeInfo-label">[[labelName]]</td>
+              <td>
+                <template is="dom-repeat"
+                    items="[[_computeLabelValues(labelName, _change.labels)]]"
+                    as="label">
+                  <div class="labelValue">
+                    <span class$="[[label.className]]">
+                      <span>[[label.value]]</span>
+                      <span>[[label.accountName]]</span>
+                      <span hidden$="[[!label.accountEmail]]">([[label.accountEmail]])</span>
+                    </span>
+                  </div>
+                </template>
+              </td>
+            </tr>
+          </template>
         </table>
       </section>
       <section class="summary">
@@ -220,6 +270,7 @@ limitations under the License.
           type: Object,
           observer: '_paramsChanged',
         },
+        serverConfig: Object,
 
         _comments: Object,
         _change: {
@@ -316,6 +367,13 @@ limitations under the License.
         return '/c/' + changeNum;
       },
 
+      _computeChangeStatus: function(status) {
+        if (status == Changes.Status.NEW) {
+          return '';
+        }
+        return '(' + status.toLowerCase() + ')';
+      },
+
       _computeDetailPath: function(changeNum) {
         return '/changes/' + changeNum + '/detail';
       },
@@ -329,7 +387,7 @@ limitations under the License.
       },
 
       _computeProjectConfigPath: function(project) {
-        return '/projects/' + project + '/config';
+        return '/projects/' + encodeURIComponent(project) + '/config';
       },
 
       _computeDetailQueryParams: function() {
@@ -338,15 +396,6 @@ limitations under the License.
             Changes.ListChangesOption.CHANGE_ACTIONS
         );
         return { O: options };
-      },
-
-      _computeReviewers: function(labels, owner) {
-        var reviewers =
-            (labels['Code-Review'] && labels['Code-Review'].all) || [];
-        if (reviewers.length == 1) { return reviewers; }
-        return reviewers.filter(function(reviewer) {
-          return reviewer._account_id != owner._account_id;
-        });
       },
 
       _computeLatestPatchNum: function(change) {
@@ -363,6 +412,33 @@ limitations under the License.
 
       _computePatchIndexIsSelected: function(index, patchNum) {
          return this._allPatchSets[index] == patchNum;
+      },
+
+      _computeLabelNames: function(labels) {
+        return Object.keys(labels).sort();
+      },
+
+      _computeLabelValues: function(labelName, labels) {
+        var result = [];
+        labels[labelName].all.forEach(function(label) {
+          if (label.value != labels[labelName].default_value) {
+            var labelClassName;
+            var labelValPrefix = '';
+            if (label.value > 0) {
+              labelValPrefix = '+'
+              labelClassName = 'approved';
+            } else if (label.value < 0) {
+              labelClassName = 'notApproved';
+            }
+            result.push({
+              value: labelValPrefix + label.value,
+              className: labelClassName,
+              accountName: label.name,
+              accountEmail: label.email,
+            });
+          }
+        });
+        return result;
       },
 
       _handleKey: function(e) {
