@@ -15,8 +15,9 @@ limitations under the License.
 -->
 
 <link rel="import" href="../bower_components/polymer/polymer.html">
-<link rel="import" href="../bower_components/iron-a11y-keys-behavior/iron-a11y-keys-behavior.html">
+<link rel="import" href="gr-account-link.html">
 <link rel="import" href="gr-ajax.html">
+<link rel="import" href="gr-change-actions.html">
 <link rel="import" href="gr-date-formatter.html">
 <link rel="import" href="gr-file-list.html">
 <link rel="import" href="gr-linked-text.html">
@@ -45,7 +46,6 @@ limitations under the License.
         display: flex;
         max-width: var(--max-constrained-width);
         padding: 1em var(--default-horizontal-margin);
-        white-space: nowrap;
         width: 100%;
         z-index: 1000;
       }
@@ -55,10 +55,13 @@ limitations under the License.
         top: 0;
         transition: box-shadow 250ms linear;
       }
-      .header h2 {
+      .header-title {
         flex: 1;
+        font-size: 1.2em;
+        font-weight: bold;
         overflow: hidden;
         text-overflow: ellipsis;
+        white-space: nowrap;
       }
       .patchSelectLabel {
         margin-left: var(--default-horizontal-margin);
@@ -112,6 +115,9 @@ limitations under the License.
       .notApproved {
         background-color: #ffd4d4;
       }
+      gr-change-actions {
+        margin-top: 1em;
+      }
       .summary {
         border-top: 1px solid #ddd;
         border-bottom: 1px solid #ddd;
@@ -142,11 +148,11 @@ limitations under the License.
     <div class="container" hidden$="{{_loading}}">
       <div class="headerContainer">
         <div class="header">
-          <h2>
+          <span class="header-title">
             <a href$="[[_computeChangePath(_change._number)]]">[[_change._number]]</a><span>:</span>
             <span>[[_change.subject]]</span>
             <span class="changeStatus">[[_computeChangeStatus(_change.status)]]</span>
-          </h2>
+          </span>
           <label class="patchSelectLabel" for="patchSetSelect">Patch set</label>
           <select id="patchSetSelect" on-change="_handlePatchChange">
             <template is="dom-repeat" items="{{_allPatchSets}}" as="patchNumber">
@@ -171,10 +177,8 @@ limitations under the License.
           <tr>
             <td class="changeInfo-label">Owner</td>
             <td>
-              <span>[[_change.owner.name]]</span>
-              <span hidden$="[[!_change.owner.email]]">
-                (<span>[[_change.owner.email]]</span>)
-              </span>
+              <gr-account-link account="[[_change.owner]]"
+                  show-email></gr-account-link>
             </td>
           </tr>
           <tr>
@@ -220,8 +224,8 @@ limitations under the License.
                   <div class="labelValue">
                     <span class$="[[label.className]]">
                       <span>[[label.value]]</span>
-                      <span>[[label.accountName]]</span>
-                      <span hidden$="[[!label.accountEmail]]">([[label.accountEmail]])</span>
+                      <gr-account-link account="[[label.account]]"
+                          show-email></gr-account-link>
                     </span>
                   </div>
                 </template>
@@ -229,6 +233,10 @@ limitations under the License.
             </tr>
           </template>
         </table>
+        <gr-change-actions id="actions"
+            change-num="[[_changeNum]]"
+            patch-num="[[_patchNum]]"
+            on-reload-change="_reload"></gr-change-actions>
       </section>
       <section class="summary">
         <gr-linked-text pre
@@ -252,17 +260,7 @@ limitations under the License.
     Polymer({
       is: 'gr-change-view',
 
-      behaviors: [
-        Polymer.IronA11yKeysBehavior
-      ],
-
       properties: {
-        keyEventTarget: {
-          type: Object,
-          value: function() {
-            return document.body;
-          },
-        },
         /**
          * URL params passed from the router.
          */
@@ -293,10 +291,10 @@ limitations under the License.
         _headerEl: Object,
         _projectConfig: Object,
         _scrollHandler: Function,
-      },
-
-      keyBindings: {
-        'a u': '_handleKey',
+        _boundKeyHandler: {
+          type: Function,
+          value: function() { return this._handleKey.bind(this); },
+        }
       },
 
       ready: function() {
@@ -308,10 +306,12 @@ limitations under the License.
 
       attached: function() {
         window.addEventListener('scroll', this._scrollHandler);
+        document.body.addEventListener('keydown', this._boundKeyHandler);
       },
 
       detached: function() {
         window.removeEventListener('scroll', this._scrollHandler);
+        document.body.removeEventListener('keydown', this._boundKeyHandler);
       },
 
       _handleBodyScroll: function(e) {
@@ -420,7 +420,8 @@ limitations under the License.
 
       _computeLabelValues: function(labelName, labels) {
         var result = [];
-        labels[labelName].all.forEach(function(label) {
+        var approvals = labels[labelName].all || [];
+        approvals.forEach(function(label) {
           if (label.value && label.value != labels[labelName].default_value) {
             var labelClassName;
             var labelValPrefix = '';
@@ -433,8 +434,7 @@ limitations under the License.
             result.push({
               value: labelValPrefix + label.value,
               className: labelClassName,
-              accountName: label.name,
-              accountEmail: label.email,
+              account: label,
             });
           }
         });
@@ -444,11 +444,11 @@ limitations under the License.
       _handleKey: function(e) {
         if (util.shouldSupressKeyboardShortcut(e)) { return; }
         e.preventDefault();
-        switch(e.detail.combo) {
-          case 'a':
+        switch(e.keyCode) {
+          case 65:  // 'a'
             this.$.replyDropdown.open();
             break;
-          case 'u':
+          case 85:  // 'u'
             page.show('/');
             break;
         }
@@ -457,16 +457,17 @@ limitations under the License.
       _reload: function() {
         var detailCompletes = this.$.detailXHR.generateRequest().completes;
         this.$.commentsXHR.generateRequest();
-        var reloadCommitInfoAndFileList = function() {
+        var reloadPatchNumDependentResources = function() {
           this.$.commitInfoXHR.generateRequest();
+          this.$.actions.reload();
           this.$.fileList.reload();
         }.bind(this);
 
         if (this._patchNum) {
-          reloadCommitInfoAndFileList();
+          reloadPatchNumDependentResources();
         } else {
           // The patch number is reliant on the change detail request.
-          detailCompletes.then(reloadCommitInfoAndFileList);
+          detailCompletes.then(reloadPatchNumDependentResources);
         }
       },
 

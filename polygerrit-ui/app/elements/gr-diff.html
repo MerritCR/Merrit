@@ -23,6 +23,10 @@ limitations under the License.
 <dom-module id="gr-diff">
   <template>
     <style>
+      .loading {
+        padding: 0 var(--default-horizontal-margin) 1em;
+        color: #666;
+      }
       .header {
         display: flex;
         margin: 0 var(--default-horizontal-margin) .75em;
@@ -52,7 +56,8 @@ limitations under the License.
     <gr-ajax id="diffXHR"
         url="[[_computeDiffPath(changeNum, patchRange.patchNum, path)]]"
         params="[[_computeDiffQueryParams(patchRange.basePatchNum)]]"
-        last-response="{{_diffResponse}}"></gr-ajax>
+        last-response="{{_diffResponse}}"
+        loading="{{_loading}}"></gr-ajax>
     <gr-ajax id="baseCommentsXHR"
         url="[[_computeCommentsPath(changeNum, patchRange.basePatchNum)]]"></gr-ajax>
     <gr-ajax id="commentsXHR"
@@ -61,50 +66,52 @@ limitations under the License.
         url="[[_computeDraftsPath(changeNum, patchRange.basePatchNum)]]"></gr-ajax>
     <gr-ajax id="draftsXHR"
         url="[[_computeDraftsPath(changeNum, patchRange.patchNum)]]"></gr-ajax>
-
-    <div class="header">
-      <gr-patch-range-select
-          path="[[path]]"
-          change-num="[[changeNum]]"
-          patch-range="[[patchRange]]"
-          available-patches="[[availablePatches]]"></gr-patch-range-select>
-      <div class="contextControl">
-        Context:
-          <select id="contextSelect" on-change="_handleContextSelectChange">
-            <option value="3">3 lines</option>
-            <option value="10">10 lines</option>
-            <option value="25">25 lines</option>
-            <option value="50">50 lines</option>
-            <option value="75">75 lines</option>
-            <option value="100">100 lines</option>
-            <option value="ALL">Whole file</option>
-          </select>
+    <div class="loading" hidden$="[[!_loading]]">Loading...</div>
+    <div hidden$="[[_loading]]" hidden>
+      <div class="header">
+        <gr-patch-range-select
+            path="[[path]]"
+            change-num="[[changeNum]]"
+            patch-range="[[patchRange]]"
+            available-patches="[[availablePatches]]"></gr-patch-range-select>
+        <div class="contextControl" hidden$="[[!prefs.context]]" hidden>
+          Context:
+            <select id="contextSelect" on-change="_handleContextSelectChange">
+              <option value="3">3 lines</option>
+              <option value="10">10 lines</option>
+              <option value="25">25 lines</option>
+              <option value="50">50 lines</option>
+              <option value="75">75 lines</option>
+              <option value="100">100 lines</option>
+              <option value="-1">Whole file</option>
+            </select>
+        </div>
       </div>
-    </div>
 
-    <div class="diffContainer">
-      <gr-diff-side id="leftDiff"
-          change-num="[[changeNum]]"
-          patch-num="[[patchRange.basePatchNum]]"
-          path="[[path]]"
-          content="{{_diff.leftSide}}"
-          width="[[sideWidth]]"
-          can-comment="[[_loggedIn]]"
-          on-expand-context="_handleExpandContext"
-          on-thread-height-change="_handleThreadHeightChange"
-          on-add-draft="_handleAddDraft"
-          on-remove-thread="_handleRemoveThread"></gr-diff-side>
-      <gr-diff-side id="rightDiff"
-          change-num="[[changeNum]]"
-          patch-num="[[patchRange.patchNum]]"
-          path="[[path]]"
-          content="{{_diff.rightSide}}"
-          width="[[sideWidth]]"
-          can-comment="[[_loggedIn]]"
-          on-expand-context="_handleExpandContext"
-          on-thread-height-change="_handleThreadHeightChange"
-          on-add-draft="_handleAddDraft"
-          on-remove-thread="_handleRemoveThread"></gr-diff-side>
+      <div class="diffContainer">
+        <gr-diff-side id="leftDiff"
+            change-num="[[changeNum]]"
+            patch-num="[[patchRange.basePatchNum]]"
+            path="[[path]]"
+            content="{{_diff.leftSide}}"
+            width="[[sideWidth]]"
+            can-comment="[[_loggedIn]]"
+            on-expand-context="_handleExpandContext"
+            on-thread-height-change="_handleThreadHeightChange"
+            on-add-draft="_handleAddDraft"
+            on-remove-thread="_handleRemoveThread"></gr-diff-side>
+        <gr-diff-side id="rightDiff"
+            change-num="[[changeNum]]"
+            patch-num="[[patchRange.patchNum]]"
+            path="[[path]]"
+            content="{{_diff.rightSide}}"
+            width="[[sideWidth]]"
+            can-comment="[[_loggedIn]]"
+            on-expand-context="_handleExpandContext"
+            on-thread-height-change="_handleThreadHeightChange"
+            on-add-draft="_handleAddDraft"
+            on-remove-thread="_handleRemoveThread"></gr-diff-side>
+      </div>
     </div>
   </template>
   <script>
@@ -121,10 +128,6 @@ limitations under the License.
        */
 
       properties: {
-        auto: {
-          type: Boolean,
-          value: false,
-        },
         availablePatches: Array,
         changeNum: String,
         /*
@@ -138,10 +141,18 @@ limitations under the License.
           type: Number,
           value: 80,
         },
-        _context: {
-          type: Number,
-          value: 10,
-          observer: '_contextChanged',
+        prefs: {
+          type: Object,
+          notify: true,
+        },
+        _prefsReady: {
+          type: Object,
+          readOnly: true,
+          value: function() {
+            return new Promise(function(resolve) {
+              this._resolvePrefsReady = resolve;
+            }.bind(this));
+          },
         },
         _baseComments: Array,
         _comments: Array,
@@ -170,11 +181,20 @@ limitations under the License.
           type: Boolean,
           value: false,
         },
+        _initialRenderComplete: {
+          type: Boolean,
+          value: false,
+        },
+        _loading: {
+          type: Boolean,
+          value: true,
+        },
         _diffRequestsPromise: Object,  // Used for testing.
+        _diffPreferencesPromise: Object,  // Used for testing.
       },
 
       observers: [
-        '_diffOptionsChanged(changeNum, patchRange, path)'
+        '_prefsChanged(prefs.*)',
       ],
 
       ready: function() {
@@ -188,21 +208,14 @@ limitations under the License.
         this.$.rightDiff.scrollToLine(lineNum);
       },
 
-      _contextChanged: function(context) {
-        if (context == Infinity) {
-          this.$.contextSelect.value = 'ALL';
-        } else {
-          this.$.contextSelect.value = context;
-        }
-      },
+      reload: function(changeNum, patchRange, path) {
+        var promises = [
+          this._prefsReady,
+          this.$.diffXHR.generateRequest().completes
+        ];
 
-      _diffOptionsChanged: function(changeNum, patchRange, path) {
-        if (!this.auto) { return; }
-
-        var promises = [this.$.diffXHR.generateRequest().completes];
-
-        var basePatchNum = patchRange.basePatchNum;
-        var patchNum = patchRange.patchNum;
+        var basePatchNum = this.patchRange.basePatchNum;
+        var patchNum = this.patchRange.patchNum;
 
         app.accountReady.then(function() {
           promises.push(this._getCommentsAndDrafts(basePatchNum, app.loggedIn));
@@ -216,6 +229,18 @@ limitations under the License.
         }.bind(this));
       },
 
+      _prefsChanged: function(changeRecord) {
+        var prefs = changeRecord.base;
+
+        this.$.contextSelect.value = prefs.context;
+
+        if (this._initialRenderComplete) {
+          this._render();
+        }
+
+        this._resolvePrefsReady(prefs);
+      },
+
       _render: function() {
         this._groupCommentsAndDrafts();
         this._processContent();
@@ -224,6 +249,8 @@ limitations under the License.
         this.async(function() {
           this.fire('render', null, {bubbles: false});
         }.bind(this), 1);
+
+        this._initialRenderComplete = true;
       },
 
       _getCommentsAndDrafts: function(basePatchNum, loggedIn) {
@@ -302,12 +329,28 @@ limitations under the License.
 
       _handleContextSelectChange: function(e) {
         var selectEl = Polymer.dom(e).rootTarget;
-        if (selectEl.value == 'ALL') {
-          this._context = Infinity;
-        } else {
-          this._context = parseInt(selectEl.value, 10);
-        }
-        this._render();
+        this.set('prefs.context', parseInt(selectEl.value, 10));
+
+        app.accountReady.then(function() {
+          if (!this._loggedIn) { return; }
+
+          this._diffPreferencesPromise =
+              this._saveDiffPreferences().catch(function(err) {
+            alert('Oops. Something went wrong. Check the console and bug the ' +
+                  'PolyGerrit team for assistance.');
+            throw err;
+          });
+        }.bind(this));
+      },
+
+      _saveDiffPreferences: function() {
+        var xhr = document.createElement('gr-request');
+        this._diffPreferencesPromise = xhr.send({
+          method: 'PUT',
+          url: '/accounts/self/preferences.diff',
+          body: this.prefs,
+        });
+        return this._diffPreferencesPromise;
       },
 
       _handleExpandContext: function(e) {
@@ -367,6 +410,12 @@ limitations under the License.
             path: this.path,
           }]
         };
+        if (diffEl == this.$.leftDiff &&
+            this.patchRange.basePatchNum == 'PARENT') {
+          comment.comments[0].side = 'PARENT';
+          comment.patchNum = this.patchRange.patchNum;
+        }
+
         if (content[insertIndex] &&
             content[insertIndex].type == 'FILLER') {
           content[insertIndex] = comment;
@@ -424,13 +473,18 @@ limitations under the License.
           }
         };
         var content = this._diffResponse.content;
+        var context = this.prefs.context;
+        if (context == -1) {
+          // Show the entire file.
+          context = Infinity;
+        }
         for (var i = 0; i < content.length; i++) {
           if (i == 0) {
-            ctx.skipRange = [0, this._context];
+            ctx.skipRange = [0, context];
           } else if (i == content.length - 1) {
-            ctx.skipRange = [this._context, 0];
+            ctx.skipRange = [context, 0];
           } else {
-            ctx.skipRange = [this._context, this._context];
+            ctx.skipRange = [context, context];
           }
           ctx.diffChunkIndex = i;
           this._addDiffChunk(ctx, content[i], leftSide, rightSide);
@@ -598,10 +652,14 @@ limitations under the License.
         var leftComments = this._groupedBaseComments[ctx.left.lineNum];
         var rightComments = this._groupedComments[ctx.right.lineNum];
         if (leftComments) {
-          leftSide.push({
+          var thread = {
             type: 'COMMENT_THREAD',
             comments: leftComments,
-          });
+          };
+          if (this.patchRange.basePatchNum == 'PARENT') {
+            thread.patchNum = this.patchRange.patchNum;
+          }
+          leftSide.push(thread);
         }
         if (rightComments) {
           rightSide.push({
