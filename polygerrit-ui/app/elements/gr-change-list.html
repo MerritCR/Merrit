@@ -42,6 +42,7 @@ limitations under the License.
     <style include="gr-change-list-styles"></style>
     <div class="headerRow">
       <span class="topHeader keyboard"></span> <!-- keyboard position indicator -->
+      <span class="topHeader star" hidden$="[[!showStar]]"></span>
       <span class="topHeader subject">Subject</span>
       <span class="topHeader status">Status</span>
       <span class="topHeader owner">Owner</span>
@@ -49,15 +50,15 @@ limitations under the License.
       <span class="topHeader branch">Branch</span>
       <span class="topHeader updated">Updated</span>
       <span class="topHeader size">Size</span>
-      <span class="topHeader codeReview" title="Code-Review">CR</span>
-      <span class="topHeader verified" title="Verified">V</span>
+      <span class="topHeader label" title="Code-Review">CR</span>
+      <span class="topHeader label" title="Verified">V</span>
     </div>
     <template is="dom-repeat" items="{{groups}}" as="changeGroup" index-as="groupIndex">
       <template is="dom-if" if="[[_groupTitle(groupIndex)]]">
         <div class="groupHeader">[[_groupTitle(groupIndex)]]</div>
       </template>
       <template is="dom-repeat" items="[[changeGroup]]" as="change">
-        <gr-change-list-item change="[[change]]"></gr-change-list-item>
+        <gr-change-list-item change="[[change]]" show-star="[[showStar]]"></gr-change-list-item>
       </template>
     </template>
   </template>
@@ -99,6 +100,10 @@ limitations under the License.
           type: Number,
           value: 0,
           observer: '_selectedIndexChanged',
+        },
+        showStar: {
+          type: Boolean,
+          value: false,
         },
         _boundKeyHandler: {
           type: Function,
