@@ -43,16 +43,12 @@ import org.eclipse.jgit.transport.ReceiveCommand;
 import java.io.IOException;
 import java.util.Collection;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 
 public class CherryPick extends SubmitStrategy {
-  private final Map<Change.Id, CodeReviewCommit> newCommits;
 
   CherryPick(SubmitStrategy.Arguments args) {
     super(args);
-    this.newCommits = new HashMap<>();
   }
 
   @Override
@@ -79,7 +75,7 @@ public class CherryPick extends SubmitStrategy {
       u.execute();
     } catch (UpdateException | RestApiException e) {
       throw new IntegrationException(
-          "Cannot cherry-pick onto " + args.destBranch);
+          "Cannot cherry-pick onto " + args.destBranch, e);
     }
     // TODO(dborowitz): When BatchUpdate is hoisted out of CherryPick,
     // SubmitStrategy should probably no longer return MergeTip, instead just
@@ -171,7 +167,6 @@ public class CherryPick extends SubmitStrategy {
         // Merge conflict; don't update change.
         return;
       }
-      ctx.getChangeUpdate().setPatchSetId(psId);
       PatchSet ps = new PatchSet(psId);
       ps.setCreatedOn(ctx.getWhen());
       ps.setUploader(args.caller.getAccountId());
@@ -181,13 +176,13 @@ public class CherryPick extends SubmitStrategy {
       ps.setGroups(GroupCollector.getCurrentGroups(args.db, c));
       args.db.patchSets().insert(Collections.singleton(ps));
       c.setCurrentPatchSet(patchSetInfo);
-      args.db.changes().update(Collections.singletonList(c));
+      ctx.saveChange();
 
       List<PatchSetApproval> approvals = Lists.newArrayList();
       for (PatchSetApproval a : args.approvalsUtil.byPatchSet(
           args.db, toMerge.getControl(), toMerge.getPatchsetId())) {
         approvals.add(new PatchSetApproval(ps.getId(), a));
-        ctx.getChangeUpdate().putApproval(a.getLabel(), a.getValue());
+        ctx.getUpdate(psId).putApproval(a.getLabel(), a.getValue());
       }
       args.db.patchSetApprovals().insert(approvals);
 
@@ -196,7 +191,7 @@ public class CherryPick extends SubmitStrategy {
       newCommit.setControl(
           args.changeControlFactory.controlFor(toMerge.change(), args.caller));
       mergeTip.moveTipTo(newCommit, newCommit);
-      newCommits.put(c.getId(), newCommit);
+      args.commits.put(newCommit);
     }
   }
 
@@ -236,11 +231,6 @@ public class CherryPick extends SubmitStrategy {
       args.mergeUtil.markCleanMerges(args.rw, args.canMergeFlag,
           mergeTip.getCurrentTip(), args.alreadyAccepted);
     }
-  }
-
-  @Override
-  public Map<Change.Id, CodeReviewCommit> getNewCommits() {
-    return newCommits;
   }
 
   static boolean dryRun(SubmitDryRun.Arguments args,

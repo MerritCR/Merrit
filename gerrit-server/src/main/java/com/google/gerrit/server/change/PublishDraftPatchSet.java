@@ -166,7 +166,7 @@ public class PublishDraftPatchSet implements RestModifyView<RevisionResource, In
     @Override
     public void updateChange(ChangeContext ctx)
         throws RestApiException, OrmException, IOException {
-      if (!ctx.getChangeControl().canPublish(ctx.getDb())) {
+      if (!ctx.getControl().canPublish(ctx.getDb())) {
         throw new AuthException("Cannot publish this draft patch set");
       }
       if (patchSet == null) {
@@ -180,15 +180,15 @@ public class PublishDraftPatchSet implements RestModifyView<RevisionResource, In
       addReviewers(ctx);
     }
 
-    private void saveChange(ChangeContext ctx) throws OrmException {
+    private void saveChange(ChangeContext ctx) {
       change = ctx.getChange();
-      ChangeUpdate update = ctx.getChangeUpdate();
+      ChangeUpdate update = ctx.getUpdate(psId);
       wasDraftChange = change.getStatus() == Change.Status.DRAFT;
       if (wasDraftChange) {
         change.setStatus(Change.Status.NEW);
         update.setStatus(change.getStatus());
         ChangeUtil.updated(change);
-        ctx.getDb().changes().update(Collections.singleton(change));
+        ctx.saveChange();
       }
     }
 
@@ -201,16 +201,16 @@ public class PublishDraftPatchSet implements RestModifyView<RevisionResource, In
       // Force ETag invalidation if not done already
       if (!wasDraftChange) {
         ChangeUtil.updated(change);
-        ctx.getDb().changes().update(Collections.singleton(change));
+        ctx.saveChange();
       }
       ctx.getDb().patchSets().update(Collections.singleton(patchSet));
     }
 
     private void addReviewers(ChangeContext ctx)
         throws OrmException, IOException {
-      LabelTypes labelTypes = ctx.getChangeControl().getLabelTypes();
+      LabelTypes labelTypes = ctx.getControl().getLabelTypes();
       Collection<Account.Id> oldReviewers = approvalsUtil.getReviewers(
-          ctx.getDb(), ctx.getChangeNotes()).values();
+          ctx.getDb(), ctx.getNotes()).values();
       RevCommit commit = ctx.getRevWalk().parseCommit(
           ObjectId.fromString(patchSet.getRevision().get()));
       patchSetInfo = patchSetInfoFactory.get(ctx.getRevWalk(), commit, psId);
@@ -219,7 +219,7 @@ public class PublishDraftPatchSet implements RestModifyView<RevisionResource, In
       recipients =
           getRecipientsFromFooters(accountResolver, patchSet, footerLines);
       recipients.remove(ctx.getUser().getAccountId());
-      approvalsUtil.addReviewers(ctx.getDb(), ctx.getChangeUpdate(), labelTypes,
+      approvalsUtil.addReviewers(ctx.getDb(), ctx.getUpdate(psId), labelTypes,
           change, patchSet, patchSetInfo, recipients.getReviewers(),
           oldReviewers);
     }

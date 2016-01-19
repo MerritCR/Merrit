@@ -84,6 +84,7 @@ import com.google.gerrit.server.ApprovalsUtil;
 import com.google.gerrit.server.ChangeMessagesUtil;
 import com.google.gerrit.server.ChangeUtil;
 import com.google.gerrit.server.IdentifiedUser;
+import com.google.gerrit.server.Sequences;
 import com.google.gerrit.server.account.AccountCache;
 import com.google.gerrit.server.account.AccountResolver;
 import com.google.gerrit.server.change.ChangeInserter;
@@ -284,6 +285,7 @@ public class ReceiveCommits {
 
   private final IdentifiedUser user;
   private final ReviewDb db;
+  private final Sequences seq;
   private final Provider<InternalChangeQuery> queryProvider;
   private final ChangeData.Factory changeDataFactory;
   private final ChangeUpdate.Factory updateFactory;
@@ -355,6 +357,7 @@ public class ReceiveCommits {
 
   @Inject
   ReceiveCommits(final ReviewDb db,
+      final Sequences seq,
       final Provider<InternalChangeQuery> queryProvider,
       final SchemaFactory<ReviewDb> schemaFactory,
       final ChangeData.Factory changeDataFactory,
@@ -401,6 +404,7 @@ public class ReceiveCommits {
       final SetHashtagsOp.Factory hashtagsFactory) throws IOException {
     this.user = projectControl.getUser().asIdentifiedUser();
     this.db = db;
+    this.seq = seq;
     this.queryProvider = queryProvider;
     this.changeDataFactory = changeDataFactory;
     this.updateFactory = updateFactory;
@@ -1733,7 +1737,7 @@ public class ReceiveCommits {
         throws OrmException {
       commit = c;
       change = new Change(changeKey,
-          new Change.Id(db.nextChangeId()),
+          new Change.Id(seq.nextChangeId()),
           user.getAccountId(),
           magicBranch.dest,
           TimeUtil.nowTs());
@@ -1807,7 +1811,7 @@ public class ReceiveCommits {
                 new BatchUpdate.Op() {
                   @Override
                   public void updateChange(ChangeContext ctx) throws Exception {
-                    ctx.getChangeUpdate().setTopic(magicBranch.topic);
+                    ctx.getUpdate(ps.getId()).setTopic(magicBranch.topic);
                   }
                 });
           }
@@ -1830,8 +1834,6 @@ public class ReceiveCommits {
     try (MergeOp op = mergeOpProvider.get()) {
       op.merge(db, rsrc.getChange(),
           changeCtl.getUser().asIdentifiedUser(), false);
-    } catch (NoSuchChangeException e) {
-      throw new OrmException(e);
     }
     addMessage("");
     Change c = db.changes().get(rsrc.getChange().getId());

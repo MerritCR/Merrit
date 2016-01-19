@@ -37,7 +37,6 @@ import org.eclipse.jgit.lib.Ref;
 import org.eclipse.jgit.transport.ReceiveCommand;
 
 import java.io.IOException;
-import java.util.Collections;
 import java.util.List;
 
 class DeleteDraftChangeOp extends BatchUpdate.Op {
@@ -74,7 +73,7 @@ class DeleteDraftChangeOp extends BatchUpdate.Op {
     if (!allowDrafts) {
       throw new MethodNotAllowedException("Draft workflow is disabled");
     }
-    if (!ctx.getChangeControl().canDeleteDraft(ctx.getDb())) {
+    if (!ctx.getControl().canDeleteDraft(ctx.getDb())) {
       throw new AuthException("Not permitted to delete this draft change");
     }
     List<PatchSet> patchSets = ctx.getDb().patchSets().byChange(id).toList();
@@ -94,8 +93,7 @@ class DeleteDraftChangeOp extends BatchUpdate.Op {
     db.patchSets().delete(patchSets);
     db.changeMessages().delete(db.changeMessages().byChange(id));
     starredChangesUtil.unstarAll(id);
-    db.changes().delete(Collections.singleton(change));
-    ctx.markDeleted();
+    ctx.deleteChange();
   }
 
   @Override

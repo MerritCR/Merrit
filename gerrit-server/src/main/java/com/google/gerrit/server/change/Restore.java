@@ -48,8 +48,6 @@ import com.google.inject.Singleton;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.Collections;
-
 @Singleton
 public class Restore implements RestModifyView<ChangeResource, RestoreInput>,
     UiAction<ChangeResource> {
@@ -110,14 +108,15 @@ public class Restore implements RestModifyView<ChangeResource, RestoreInput>,
         ResourceConflictException {
       caller = ctx.getUser().asIdentifiedUser();
       change = ctx.getChange();
-      ChangeUpdate update = ctx.getChangeUpdate();
+      PatchSet.Id psId = change.currentPatchSetId();
+      ChangeUpdate update = ctx.getUpdate(psId);
       if (change == null || change.getStatus() != Status.ABANDONED) {
         throw new ResourceConflictException("change is " + status(change));
       }
-      patchSet = ctx.getDb().patchSets().get(change.currentPatchSetId());
+      patchSet = ctx.getDb().patchSets().get(psId);
       change.setStatus(Status.NEW);
       change.setLastUpdatedOn(ctx.getWhen());
-      ctx.getDb().changes().update(Collections.singleton(change));
+      ctx.saveChange();
       update.setStatus(change.getStatus());
 
       message = newMessage(ctx.getDb());

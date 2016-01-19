@@ -206,10 +206,10 @@ public class PatchSetInserter extends BatchUpdate.Op {
   @Override
   public void updateChange(ChangeContext ctx) throws OrmException,
       InvalidChangeOperationException, IOException {
-    ChangeControl ctl = ctx.getChangeControl();
+    ChangeControl ctl = ctx.getControl();
 
     change = ctx.getChange();
-    ChangeUpdate update = ctx.getChangeUpdate();
+    ChangeUpdate update = ctx.getUpdate(psId);
 
     if (!change.getStatus().isOpen() && !allowClosed) {
       throw new InvalidChangeOperationException(String.format(
@@ -221,8 +221,6 @@ public class PatchSetInserter extends BatchUpdate.Op {
     patchSet.setUploader(firstNonNull(uploader, ctl.getChange().getOwner()));
     patchSet.setRevision(new RevId(commit.name()));
     patchSet.setDraft(draft);
-
-    update.setPatchSetId(patchSet.getId());
 
     if (groups != null) {
       patchSet.setGroups(groups);
@@ -248,10 +246,10 @@ public class PatchSetInserter extends BatchUpdate.Op {
     }
     change.setCurrentPatchSet(patchSetInfo);
     ChangeUtil.updated(change);
-    db.changes().update(Collections.singleton(change));
+    ctx.saveChange();
     approvalCopier.copy(db, ctl, patchSet);
     if (changeMessage != null) {
-      cmUtil.addChangeMessage(db, ctx.getChangeUpdate(), changeMessage);
+      cmUtil.addChangeMessage(db, update, changeMessage);
     }
   }
 
