@@ -27,7 +27,7 @@ import com.google.gerrit.reviewdb.client.Change;
 import com.google.gerrit.reviewdb.client.PatchSet;
 import com.google.gerrit.reviewdb.client.PatchSetInfo;
 import com.google.gerrit.reviewdb.server.ReviewDb;
-import com.google.gerrit.server.ChangeUtil;
+import com.google.gerrit.server.PatchSetUtil;
 import com.google.gerrit.server.change.DeleteDraftPatchSet.Input;
 import com.google.gerrit.server.config.GerritServerConfig;
 import com.google.gerrit.server.git.BatchUpdate;
@@ -57,6 +57,7 @@ public class DeleteDraftPatchSet implements RestModifyView<RevisionResource, Inp
   private final Provider<ReviewDb> db;
   private final BatchUpdate.Factory updateFactory;
   private final PatchSetInfoFactory patchSetInfoFactory;
+  private final PatchSetUtil psUtil;
   private final Provider<DeleteDraftChangeOp> deleteChangeOpProvider;
   private final boolean allowDrafts;
 
@@ -64,11 +65,13 @@ public class DeleteDraftPatchSet implements RestModifyView<RevisionResource, Inp
   public DeleteDraftPatchSet(Provider<ReviewDb> db,
       BatchUpdate.Factory updateFactory,
       PatchSetInfoFactory patchSetInfoFactory,
+      PatchSetUtil psUtil,
       Provider<DeleteDraftChangeOp> deleteChangeOpProvider,
       @GerritServerConfig Config cfg) {
     this.db = db;
     this.updateFactory = updateFactory;
     this.patchSetInfoFactory = patchSetInfoFactory;
+    this.psUtil = psUtil;
     this.deleteChangeOpProvider = deleteChangeOpProvider;
     this.allowDrafts = cfg.getBoolean("change", "allowDrafts", true);
   }
@@ -96,11 +99,11 @@ public class DeleteDraftPatchSet implements RestModifyView<RevisionResource, Inp
     }
 
     @Override
-    public void updateChange(ChangeContext ctx)
+    public boolean updateChange(ChangeContext ctx)
         throws RestApiException, OrmException, IOException {
-      patchSet = ctx.getDb().patchSets().get(psId);
+      patchSet = psUtil.get(ctx.getDb(), ctx.getNotes(), psId);
       if (patchSet == null) {
-        return; // Nothing to do.
+        return false; // Nothing to do.
       }
       if (!patchSet.isDraft()) {
         throw new ResourceConflictException("Patch set is not a draft");
@@ -114,6 +117,7 @@ public class DeleteDraftPatchSet implements RestModifyView<RevisionResource, Inp
 
       deleteDraftPatchSet(patchSet, ctx);
       deleteOrUpdateDraftChange(ctx);
+      return true;
     }
 
     @Override
@@ -143,7 +147,7 @@ public class DeleteDraftPatchSet implements RestModifyView<RevisionResource, Inp
     private void deleteOrUpdateDraftChange(ChangeContext ctx)
         throws OrmException, RestApiException {
       Change c = ctx.getChange();
-      if (Iterables.isEmpty(ctx.getDb().patchSets().byChange(c.getId()))) {
+      if (Iterables.isEmpty(psUtil.byChange(ctx.getDb(), ctx.getNotes()))) {
         deleteChangeOp = deleteChangeOpProvider.get();
         deleteChangeOp.updateChange(ctx);
         return;
@@ -151,7 +155,6 @@ public class DeleteDraftPatchSet implements RestModifyView<RevisionResource, Inp
       if (c.currentPatchSetId().equals(psId)) {
         c.setCurrentPatchSet(previousPatchSetInfo(ctx));
       }
-      ChangeUtil.updated(c);
       ctx.saveChange();
     }
 
@@ -160,7 +163,7 @@ public class DeleteDraftPatchSet implements RestModifyView<RevisionResource, Inp
       try {
         // TODO(dborowitz): Get this in a way that doesn't involve re-opening
         // the repo after the updateRepo phase.
-        return patchSetInfoFactory.get(ctx.getDb(),
+        return patchSetInfoFactory.get(ctx.getDb(), ctx.getNotes(),
             new PatchSet.Id(psId.getParentKey(), psId.get() - 1));
       } catch (PatchSetInfoNotAvailableException e) {
         throw new OrmException(e);

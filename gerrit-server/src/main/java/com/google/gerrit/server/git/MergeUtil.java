@@ -20,6 +20,7 @@ import com.google.common.base.Function;
 import com.google.common.base.Joiner;
 import com.google.common.base.Strings;
 import com.google.common.collect.Iterables;
+import com.google.common.collect.Sets;
 import com.google.gerrit.common.FooterConstants;
 import com.google.gerrit.common.Nullable;
 import com.google.gerrit.common.data.LabelType;
@@ -669,6 +670,42 @@ public class MergeUtil {
       }
     } catch (IOException e) {
       throw new IntegrationException("Cannot mark clean merges", e);
+    }
+  }
+
+  public Set<Change.Id> findUnmergedChanges(Set<Change.Id> expected,
+      CodeReviewRevWalk rw, RevFlag canMergeFlag, CodeReviewCommit oldTip,
+      CodeReviewCommit mergeTip) throws IntegrationException {
+    if (mergeTip == null) {
+      return expected;
+    }
+
+    try {
+      Set<Change.Id> found = Sets.newHashSetWithExpectedSize(expected.size());
+      rw.resetRetain(canMergeFlag);
+      rw.sort(RevSort.TOPO);
+      rw.markStart(mergeTip);
+      if (oldTip != null) {
+        rw.markUninteresting(oldTip);
+      }
+
+      CodeReviewCommit c;
+      while ((c = rw.next()) != null) {
+        if (c.getPatchsetId() == null) {
+          continue;
+        }
+        Change.Id id = c.getPatchsetId().getParentKey();
+        if (!expected.contains(id)) {
+          continue;
+        }
+        found.add(id);
+        if (found.size() == expected.size()) {
+          return Collections.emptySet();
+        }
+      }
+      return Sets.difference(expected, found);
+    } catch (IOException e) {
+      throw new IntegrationException("Cannot check if changes were merged", e);
     }
   }
 }

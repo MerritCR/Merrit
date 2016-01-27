@@ -31,7 +31,10 @@ import com.google.gerrit.reviewdb.client.Account;
 import com.google.gerrit.reviewdb.client.Change;
 import com.google.gerrit.reviewdb.client.PatchSet;
 import com.google.gerrit.reviewdb.client.Project;
+import com.google.gerrit.server.IdentifiedUser;
 import com.google.gerrit.server.change.ConsistencyChecker;
+import com.google.gerrit.server.notedb.ChangeUpdate;
+import com.google.gerrit.server.project.ChangeControl;
 import com.google.gerrit.testutil.TestChanges;
 import com.google.inject.Inject;
 import com.google.inject.Provider;
@@ -49,7 +52,16 @@ import java.util.List;
 @NoHttpd
 public class ConsistencyCheckerIT extends AbstractDaemonTest {
   @Inject
+  private ChangeControl.GenericFactory changeControlFactory;
+
+  @Inject
+  private ChangeUpdate.Factory changeUpdateFactory;
+
+  @Inject
   private Provider<ConsistencyChecker> checkerProvider;
+
+  @Inject
+  private IdentifiedUser.GenericFactory userFactory;
 
   private RevCommit tip;
   private Account.Id adminId;
@@ -208,8 +220,8 @@ public class ConsistencyCheckerIT extends AbstractDaemonTest {
 
     c = db.changes().get(c.getId());
     assertThat(c.currentPatchSetId().get()).isEqualTo(1);
-    assertThat(db.patchSets().get(ps1.getId())).isNotNull();
-    assertThat(db.patchSets().get(ps2.getId())).isNull();
+    assertThat(getPatchSet(ps1.getId())).isNotNull();
+    assertThat(getPatchSet(ps2.getId())).isNull();
   }
 
   @Test
@@ -256,10 +268,10 @@ public class ConsistencyCheckerIT extends AbstractDaemonTest {
 
     c = db.changes().get(c.getId());
     assertThat(c.currentPatchSetId().get()).isEqualTo(3);
-    assertThat(db.patchSets().get(ps1.getId())).isNotNull();
-    assertThat(db.patchSets().get(ps2.getId())).isNull();
-    assertThat(db.patchSets().get(ps3.getId())).isNotNull();
-    assertThat(db.patchSets().get(ps4.getId())).isNull();
+    assertThat(getPatchSet(ps1.getId())).isNotNull();
+    assertThat(getPatchSet(ps2.getId())).isNull();
+    assertThat(getPatchSet(ps3.getId())).isNotNull();
+    assertThat(getPatchSet(ps4.getId())).isNull();
   }
 
   @Test
@@ -284,7 +296,7 @@ public class ConsistencyCheckerIT extends AbstractDaemonTest {
 
     c = db.changes().get(c.getId());
     assertThat(c.currentPatchSetId().get()).isEqualTo(1);
-    assertThat(db.patchSets().get(ps1.getId())).isNotNull();
+    assertThat(getPatchSet(ps1.getId())).isNotNull();
   }
 
   @Test
@@ -442,7 +454,7 @@ public class ConsistencyCheckerIT extends AbstractDaemonTest {
     c = db.changes().get(c.getId());
     PatchSet.Id psId2 = new PatchSet.Id(c.getId(), 2);
     assertThat(c.currentPatchSetId()).isEqualTo(psId2);
-    assertThat(db.patchSets().get(psId2).getRevision().get())
+    assertThat(getPatchSet(psId2).getRevision().get())
         .isEqualTo(mergedAs.name());
 
     assertProblems(c);
@@ -484,7 +496,7 @@ public class ConsistencyCheckerIT extends AbstractDaemonTest {
     c = db.changes().get(c.getId());
     PatchSet.Id psId2 = new PatchSet.Id(c.getId(), 2);
     assertThat(c.currentPatchSetId()).isEqualTo(psId2);
-    assertThat(db.patchSets().get(psId2).getRevision().get())
+    assertThat(getPatchSet(psId2).getRevision().get())
         .isEqualTo(mergedAs.name());
 
     assertProblems(c);
@@ -570,6 +582,13 @@ public class ConsistencyCheckerIT extends AbstractDaemonTest {
   private Change insertChange() throws Exception {
     Change c = newChange(project, adminId);
     db.changes().insert(singleton(c));
+
+    ChangeUpdate u = changeUpdateFactory.create(
+        changeControlFactory.controlFor(c, userFactory.create(adminId)));
+    u.setSubject(c.getSubject());
+    u.setBranch(c.getDest().get());
+    u.commit();
+
     return c;
   }
 

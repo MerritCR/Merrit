@@ -40,8 +40,15 @@ util.escapeHTML = function(str) {
 };
 
 util.shouldSupressKeyboardShortcut = function(e) {
+  var getModifierState = e.getModifierState ?
+      e.getModifierState.bind(e) :
+      function() { return false; };
   var target = e.detail ? e.detail.keyboardEvent : e.target;
-  return target.tagName == 'INPUT' ||
+  return getModifierState('Control') ||
+         getModifierState('Alt') ||
+         getModifierState('Meta') ||
+         getModifierState('Fn') ||
+         target.tagName == 'INPUT' ||
          target.tagName == 'TEXTAREA' ||
          target.tagName == 'SELECT' ||
          target.tagName == 'BUTTON' ||

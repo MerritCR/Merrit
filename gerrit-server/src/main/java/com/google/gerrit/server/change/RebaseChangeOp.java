@@ -131,15 +131,13 @@ public class RebaseChangeOp extends BatchUpdate.Op {
            ctx.getRepository(), ctx.getRevWalk()));
     }
 
-    ObjectId newId = rebaseCommit(ctx, original, baseCommit);
-    rebasedCommit = rw.parseCommit(newId);
+    rebasedCommit = rebaseCommit(ctx, original, baseCommit);
 
     rebasedPatchSetId = ChangeUtil.nextPatchSetId(
         ctx.getRepository(), ctl.getChange().currentPatchSetId());
     patchSetInserter = patchSetInserterFactory
         .create(ctl.getRefControl(), rebasedPatchSetId, rebasedCommit)
         .setDraft(originalPatchSet.isDraft())
-        .setUploader(ctx.getUser().getAccountId())
         .setSendMail(false)
         .setRunHooks(runHooks)
         .setCopyApprovals(copyApprovals)
@@ -153,10 +151,11 @@ public class RebaseChangeOp extends BatchUpdate.Op {
   }
 
   @Override
-  public void updateChange(ChangeContext ctx)
+  public boolean updateChange(ChangeContext ctx)
       throws OrmException, InvalidChangeOperationException, IOException {
-    patchSetInserter.updateChange(ctx);
+    boolean ret = patchSetInserter.updateChange(ctx);
     rebasedPatchSet = patchSetInserter.getPatchSet();
+    return ret;
   }
 
   @Override
@@ -168,6 +167,12 @@ public class RebaseChangeOp extends BatchUpdate.Op {
     checkState(rebasedCommit != null,
         "getRebasedCommit() only valid after updateRepo");
     return rebasedCommit;
+  }
+
+  public PatchSet.Id getPatchSetId() {
+    checkState(rebasedPatchSetId != null,
+        "getPatchSetId() only valid after updateRepo");
+    return rebasedPatchSetId;
   }
 
   public PatchSet getPatchSet() {

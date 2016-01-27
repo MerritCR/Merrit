@@ -27,6 +27,7 @@ import com.google.gerrit.reviewdb.client.PatchLineComment;
 import com.google.gerrit.reviewdb.client.PatchSet;
 import com.google.gerrit.reviewdb.server.ReviewDb;
 import com.google.gerrit.server.PatchLineCommentsUtil;
+import com.google.gerrit.server.PatchSetUtil;
 import com.google.gerrit.server.change.DeleteDraftComment.Input;
 import com.google.gerrit.server.git.BatchUpdate;
 import com.google.gerrit.server.git.BatchUpdate.ChangeContext;
@@ -47,16 +48,19 @@ public class DeleteDraftComment
 
   private final Provider<ReviewDb> db;
   private final PatchLineCommentsUtil plcUtil;
+  private final PatchSetUtil psUtil;
   private final BatchUpdate.Factory updateFactory;
   private final PatchListCache patchListCache;
 
   @Inject
   DeleteDraftComment(Provider<ReviewDb> db,
       PatchLineCommentsUtil plcUtil,
+      PatchSetUtil psUtil,
       BatchUpdate.Factory updateFactory,
       PatchListCache patchListCache) {
     this.db = db;
     this.plcUtil = plcUtil;
+    this.psUtil = psUtil;
     this.updateFactory = updateFactory;
     this.patchListCache = patchListCache;
   }
@@ -82,15 +86,15 @@ public class DeleteDraftComment
     }
 
     @Override
-    public void updateChange(ChangeContext ctx)
+    public boolean updateChange(ChangeContext ctx)
         throws ResourceNotFoundException, OrmException {
       Optional<PatchLineComment> maybeComment =
           plcUtil.get(ctx.getDb(), ctx.getNotes(), key);
       if (!maybeComment.isPresent()) {
-        return; // Nothing to do.
+        return false; // Nothing to do.
       }
       PatchSet.Id psId = key.getParentKey().getParentKey();
-      PatchSet ps = ctx.getDb().patchSets().get(psId);
+      PatchSet ps = psUtil.get(ctx.getDb(), ctx.getNotes(), psId);
       if (ps == null) {
         throw new ResourceNotFoundException("patch set not found: " + psId);
       }
@@ -98,6 +102,7 @@ public class DeleteDraftComment
       setCommentRevId(c, patchListCache, ctx.getChange(), ps);
       plcUtil.deleteComments(
           ctx.getDb(), ctx.getUpdate(psId), Collections.singleton(c));
+      return true;
     }
   }
 }

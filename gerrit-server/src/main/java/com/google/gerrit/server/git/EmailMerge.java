@@ -52,7 +52,7 @@ public class EmailMerge implements Runnable, RequestContext {
   private ReviewDb db;
 
   @Inject
-  EmailMerge(@EmailReviewCommentsExecutor ExecutorService executor,
+  EmailMerge(@SendEmailExecutor ExecutorService executor,
       MergedSender.Factory mergedSenderFactory,
       SchemaFactory<ReviewDb> schemaFactory,
       ThreadLocalRequestContext requestContext,
@@ -66,7 +66,7 @@ public class EmailMerge implements Runnable, RequestContext {
     this.submitter = submitter;
   }
 
-  void sendAsync() {
+  public void sendAsync() {
     sendEmailsExecutor.submit(this);
   }
 

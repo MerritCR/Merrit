@@ -237,8 +237,10 @@ public class ChangeScreen extends Screen {
     add(uiBinder.createAndBindUi(this));
   }
 
-  Change.Id getChangeId() {
-    return changeId;
+  PatchSet.Id getPatchSetId() {
+    return new PatchSet.Id(
+        changeInfo.legacyId(),
+        changeInfo.revisions().get(revision)._number());
   }
 
   @Override
@@ -1141,6 +1143,8 @@ public class ChangeScreen extends Screen {
               canSubmit = false;
             }
             break;
+          case MAY:
+          case OK:
           default:
             break;
           }

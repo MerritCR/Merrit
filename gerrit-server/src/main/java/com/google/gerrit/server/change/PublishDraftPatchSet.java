@@ -37,6 +37,7 @@ import com.google.gerrit.reviewdb.server.ReviewDb;
 import com.google.gerrit.server.ApprovalsUtil;
 import com.google.gerrit.server.ChangeUtil;
 import com.google.gerrit.server.CurrentUser;
+import com.google.gerrit.server.PatchSetUtil;
 import com.google.gerrit.server.account.AccountResolver;
 import com.google.gerrit.server.change.PublishDraftPatchSet.Input;
 import com.google.gerrit.server.git.BatchUpdate;
@@ -73,32 +74,35 @@ public class PublishDraftPatchSet implements RestModifyView<RevisionResource, In
   public static class Input {
   }
 
-  private final Provider<ReviewDb> dbProvider;
+  private final AccountResolver accountResolver;
+  private final ApprovalsUtil approvalsUtil;
   private final BatchUpdate.Factory updateFactory;
   private final ChangeHooks hooks;
-  private final ApprovalsUtil approvalsUtil;
-  private final AccountResolver accountResolver;
-  private final PatchSetInfoFactory patchSetInfoFactory;
   private final CreateChangeSender.Factory createChangeSenderFactory;
+  private final PatchSetInfoFactory patchSetInfoFactory;
+  private final PatchSetUtil psUtil;
+  private final Provider<ReviewDb> dbProvider;
   private final ReplacePatchSetSender.Factory replacePatchSetFactory;
 
   @Inject
   public PublishDraftPatchSet(
-      Provider<ReviewDb> dbProvider,
+      AccountResolver accountResolver,
+      ApprovalsUtil approvalsUtil,
       BatchUpdate.Factory updateFactory,
       ChangeHooks hooks,
-      ApprovalsUtil approvalsUtil,
-      AccountResolver accountResolver,
-      PatchSetInfoFactory patchSetInfoFactory,
       CreateChangeSender.Factory createChangeSenderFactory,
+      PatchSetInfoFactory patchSetInfoFactory,
+      PatchSetUtil psUtil,
+      Provider<ReviewDb> dbProvider,
       ReplacePatchSetSender.Factory replacePatchSetFactory) {
-    this.dbProvider = dbProvider;
+    this.accountResolver = accountResolver;
+    this.approvalsUtil = approvalsUtil;
     this.updateFactory = updateFactory;
     this.hooks = hooks;
-    this.approvalsUtil = approvalsUtil;
-    this.accountResolver = accountResolver;
-    this.patchSetInfoFactory = patchSetInfoFactory;
     this.createChangeSenderFactory = createChangeSenderFactory;
+    this.patchSetInfoFactory = patchSetInfoFactory;
+    this.psUtil = psUtil;
+    this.dbProvider = dbProvider;
     this.replacePatchSetFactory = replacePatchSetFactory;
   }
 
@@ -164,13 +168,13 @@ public class PublishDraftPatchSet implements RestModifyView<RevisionResource, In
     }
 
     @Override
-    public void updateChange(ChangeContext ctx)
+    public boolean updateChange(ChangeContext ctx)
         throws RestApiException, OrmException, IOException {
       if (!ctx.getControl().canPublish(ctx.getDb())) {
         throw new AuthException("Cannot publish this draft patch set");
       }
       if (patchSet == null) {
-        patchSet = ctx.getDb().patchSets().get(psId);
+        patchSet = psUtil.get(ctx.getDb(), ctx.getNotes(), psId);
         if (patchSet == null) {
           throw new ResourceNotFoundException(psId.toString());
         }
@@ -178,6 +182,7 @@ public class PublishDraftPatchSet implements RestModifyView<RevisionResource, In
       saveChange(ctx);
       savePatchSet(ctx);
       addReviewers(ctx);
+      return true;
     }
 
     private void saveChange(ChangeContext ctx) {
@@ -187,7 +192,6 @@ public class PublishDraftPatchSet implements RestModifyView<RevisionResource, In
       if (wasDraftChange) {
         change.setStatus(Change.Status.NEW);
         update.setStatus(change.getStatus());
-        ChangeUtil.updated(change);
         ctx.saveChange();
       }
     }
@@ -200,7 +204,6 @@ public class PublishDraftPatchSet implements RestModifyView<RevisionResource, In
       patchSet.setDraft(false);
       // Force ETag invalidation if not done already
       if (!wasDraftChange) {
-        ChangeUtil.updated(change);
         ctx.saveChange();
       }
       ctx.getDb().patchSets().update(Collections.singleton(patchSet));
@@ -216,8 +219,8 @@ public class PublishDraftPatchSet implements RestModifyView<RevisionResource, In
       patchSetInfo = patchSetInfoFactory.get(ctx.getRevWalk(), commit, psId);
 
       List<FooterLine> footerLines = commit.getFooterLines();
-      recipients =
-          getRecipientsFromFooters(accountResolver, patchSet, footerLines);
+      recipients = getRecipientsFromFooters(
+          accountResolver, patchSet.isDraft(), footerLines);
       recipients.remove(ctx.getUser().getAccountId());
       approvalsUtil.addReviewers(ctx.getDb(), ctx.getUpdate(psId), labelTypes,
           change, patchSet, patchSetInfo, recipients.getReviewers(),

@@ -29,11 +29,11 @@ import com.google.gerrit.reviewdb.client.Change;
 import com.google.gerrit.reviewdb.client.ChangeMessage;
 import com.google.gerrit.reviewdb.client.PatchSet;
 import com.google.gerrit.reviewdb.client.PatchSetInfo;
-import com.google.gerrit.reviewdb.client.RevId;
 import com.google.gerrit.reviewdb.server.ReviewDb;
 import com.google.gerrit.server.ApprovalsUtil;
 import com.google.gerrit.server.ChangeMessagesUtil;
 import com.google.gerrit.server.ChangeUtil;
+import com.google.gerrit.server.PatchSetUtil;
 import com.google.gerrit.server.events.CommitReceivedEvent;
 import com.google.gerrit.server.git.BanCommit;
 import com.google.gerrit.server.git.BatchUpdate;
@@ -41,7 +41,7 @@ import com.google.gerrit.server.git.BatchUpdate.ChangeContext;
 import com.google.gerrit.server.git.BatchUpdate.Context;
 import com.google.gerrit.server.git.BatchUpdate.RepoContext;
 import com.google.gerrit.server.git.GroupCollector;
-import com.google.gerrit.server.git.WorkQueue;
+import com.google.gerrit.server.git.SendEmailExecutor;
 import com.google.gerrit.server.git.validators.CommitValidationException;
 import com.google.gerrit.server.git.validators.CommitValidators;
 import com.google.gerrit.server.mail.CreateChangeSender;
@@ -70,6 +70,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ExecutorService;
 
 public class ChangeInserter extends BatchUpdate.InsertChangeOp {
   public static interface Factory {
@@ -81,15 +82,16 @@ public class ChangeInserter extends BatchUpdate.InsertChangeOp {
 
   private final ProjectControl.GenericFactory projectControlFactory;
   private final PatchSetInfoFactory patchSetInfoFactory;
+  private final PatchSetUtil psUtil;
   private final ChangeHooks hooks;
   private final ApprovalsUtil approvalsUtil;
   private final ChangeMessagesUtil cmUtil;
   private final CreateChangeSender.Factory createChangeSenderFactory;
-  private final WorkQueue workQueue;
+  private final ExecutorService sendEmailExecutor;
   private final CommitValidators.Factory commitValidatorsFactory;
 
-  private final PatchSet patchSet;
   private final Change.Id changeId;
+  private final PatchSet.Id psId;
   private final RevCommit commit;
   private final String refName;
 
@@ -97,6 +99,7 @@ public class ChangeInserter extends BatchUpdate.InsertChangeOp {
   private Change.Status status;
   private String topic;
   private String message;
+  private Iterable<String> groups;
   private CommitValidators.Policy validatePolicy =
       CommitValidators.Policy.GERRIT;
   private Set<Account.Id> reviewers;
@@ -111,29 +114,33 @@ public class ChangeInserter extends BatchUpdate.InsertChangeOp {
   private Change change;
   private ChangeMessage changeMessage;
   private PatchSetInfo patchSetInfo;
+  private PatchSet patchSet;
 
   @Inject
   ChangeInserter(ProjectControl.GenericFactory projectControlFactory,
       PatchSetInfoFactory patchSetInfoFactory,
+      PatchSetUtil psUtil,
       ChangeHooks hooks,
       ApprovalsUtil approvalsUtil,
       ChangeMessagesUtil cmUtil,
       CreateChangeSender.Factory createChangeSenderFactory,
-      WorkQueue workQueue,
+      @SendEmailExecutor ExecutorService sendEmailExecutor,
       CommitValidators.Factory commitValidatorsFactory,
       @Assisted Change.Id changeId,
       @Assisted RevCommit commit,
       @Assisted String refName) {
     this.projectControlFactory = projectControlFactory;
     this.patchSetInfoFactory = patchSetInfoFactory;
+    this.psUtil = psUtil;
     this.hooks = hooks;
     this.approvalsUtil = approvalsUtil;
     this.cmUtil = cmUtil;
     this.createChangeSenderFactory = createChangeSenderFactory;
-    this.workQueue = workQueue;
+    this.sendEmailExecutor = sendEmailExecutor;
     this.commitValidatorsFactory = commitValidatorsFactory;
 
     this.changeId = changeId;
+    this.psId = new PatchSet.Id(changeId, INITIAL_PATCH_SET_ID);
     this.commit = commit;
     this.refName = refName;
     this.reviewers = Collections.emptySet();
@@ -142,10 +149,6 @@ public class ChangeInserter extends BatchUpdate.InsertChangeOp {
     this.runHooks = true;
     this.sendMail = true;
     this.updateRef = true;
-
-    patchSet =
-        new PatchSet(new PatchSet.Id(changeId, INITIAL_PATCH_SET_ID));
-    patchSet.setRevision(new RevId(commit.name()));
   }
 
   @Override
@@ -158,8 +161,6 @@ public class ChangeInserter extends BatchUpdate.InsertChangeOp {
         ctx.getWhen());
     change.setStatus(MoreObjects.firstNonNull(status, Change.Status.NEW));
     change.setTopic(topic);
-    patchSet.setCreatedOn(ctx.getWhen());
-    patchSet.setUploader(ctx.getUser().getAccountId());
     return change;
   }
 
@@ -168,17 +169,20 @@ public class ChangeInserter extends BatchUpdate.InsertChangeOp {
     if (!idList.isEmpty()) {
       return new Change.Key(idList.get(idList.size() - 1).trim());
     }
+    ObjectId id = ChangeIdUtil.computeChangeId(commit.getTree(), commit,
+        commit.getAuthorIdent(), commit.getCommitterIdent(),
+        commit.getShortMessage());
+    StringBuilder changeId = new StringBuilder();
+    changeId.append("I").append(ObjectId.toString(id));
+    return new Change.Key(changeId.toString());
+  }
 
-    try {
-      ObjectId id = ChangeIdUtil.computeChangeId(commit.getTree(), commit,
-          commit.getAuthorIdent(), commit.getCommitterIdent(),
-          commit.getShortMessage());
-      StringBuilder changeId = new StringBuilder();
-      changeId.append("I").append(ObjectId.toString(id));
-      return new Change.Key(changeId.toString());
-    } catch (IOException e) {
-      throw new IllegalStateException(e);
-    }
+  public PatchSet.Id getPatchSetId() {
+    return psId;
+  }
+
+  public RevCommit getCommit() {
+    return commit;
   }
 
   public Change getChange() {
@@ -222,14 +226,13 @@ public class ChangeInserter extends BatchUpdate.InsertChangeOp {
     checkState(change == null,
         "setStatus(Change.Status) only valid before creating change");
     this.status = status;
-    if (Change.Status.DRAFT.equals(status)) {
-      patchSet.setDraft(true);
-    }
     return this;
   }
 
   public ChangeInserter setGroups(Iterable<String> groups) {
-    patchSet.setGroups(groups);
+    checkState(patchSet == null,
+        "setGroups(Iterable<String>) only valid before creating change");
+    this.groups = groups;
     return this;
   }
 
@@ -249,6 +252,8 @@ public class ChangeInserter extends BatchUpdate.InsertChangeOp {
   }
 
   public PatchSet getPatchSet() {
+    checkState(patchSet != null,
+        "getPatchSet() only valid after creating change");
     return patchSet;
   }
 
@@ -279,26 +284,30 @@ public class ChangeInserter extends BatchUpdate.InsertChangeOp {
       return;
     }
     ctx.addRefUpdate(
-        new ReceiveCommand(ObjectId.zeroId(), commit, patchSet.getRefName()));
+        new ReceiveCommand(ObjectId.zeroId(), commit, psId.toRefName()));
   }
 
   @Override
-  public void updateChange(ChangeContext ctx) throws OrmException, IOException {
+  public boolean updateChange(ChangeContext ctx) throws OrmException, IOException {
     change = ctx.getChange(); // Use defensive copy created by ChangeControl.
     ReviewDb db = ctx.getDb();
     ChangeControl ctl = ctx.getControl();
-    patchSetInfo = patchSetInfoFactory.get(
-        ctx.getRevWalk(), commit, patchSet.getId());
+    patchSetInfo = patchSetInfoFactory.get(ctx.getRevWalk(), commit, psId);
     ctx.getChange().setCurrentPatchSet(patchSetInfo);
 
-    ChangeUpdate update = ctx.getUpdate(patchSet.getId());
-    update.setSubject("Create change");
+    ChangeUpdate update = ctx.getUpdate(psId);
+    update.setSubjectForCommit("Create change");
+    update.setSubject(change.getSubject());
+    update.setBranch(change.getDest().get());
     update.setTopic(change.getTopic());
 
-    if (patchSet.getGroups() == null) {
-      patchSet.setGroups(GroupCollector.getDefaultGroups(patchSet));
+    boolean draft = status == Change.Status.DRAFT;
+    Iterable<String> newGroups = groups;
+    if (newGroups == null) {
+      newGroups = GroupCollector.getDefaultGroups(commit);
     }
-    db.patchSets().insert(Collections.singleton(patchSet));
+    patchSet = psUtil.insert(
+        ctx.getDb(), update, psId, commit, draft, newGroups, null);
     ctx.saveChange();
 
     /* TODO: fixStatus is used here because the tests
@@ -324,6 +333,7 @@ public class ChangeInserter extends BatchUpdate.InsertChangeOp {
       changeMessage.setMessage(message);
       cmUtil.addChangeMessage(db, update, changeMessage);
     }
+    return true;
   }
 
   @Override
@@ -351,7 +361,7 @@ public class ChangeInserter extends BatchUpdate.InsertChangeOp {
         }
       };
       if (requestScopePropagator != null) {
-        workQueue.getDefaultQueue().submit(requestScopePropagator.wrap(sender));
+        sendEmailExecutor.submit(requestScopePropagator.wrap(sender));
       } else {
         sender.run();
       }
@@ -380,7 +390,7 @@ public class ChangeInserter extends BatchUpdate.InsertChangeOp {
       CommitValidators cv = commitValidatorsFactory.create(
           refControl, new NoSshInfo(), ctx.getRepository());
 
-      String refName = patchSet.getId().toRefName();
+      String refName = psId.toRefName();
       CommitReceivedEvent event = new CommitReceivedEvent(
           new ReceiveCommand(
               ObjectId.zeroId(),

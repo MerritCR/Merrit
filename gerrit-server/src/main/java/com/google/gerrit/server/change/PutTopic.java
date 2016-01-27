@@ -28,7 +28,6 @@ import com.google.gerrit.reviewdb.client.ChangeMessage;
 import com.google.gerrit.reviewdb.server.ReviewDb;
 import com.google.gerrit.server.ChangeMessagesUtil;
 import com.google.gerrit.server.ChangeUtil;
-import com.google.gerrit.server.IdentifiedUser;
 import com.google.gerrit.server.change.PutTopic.Input;
 import com.google.gerrit.server.git.BatchUpdate;
 import com.google.gerrit.server.git.BatchUpdate.ChangeContext;
@@ -73,7 +72,7 @@ public class PutTopic implements RestModifyView<ChangeResource, Input>,
       throw new AuthException("changing topic not permitted");
     }
 
-    Op op = new Op(ctl, input != null ? input : new Input());
+    Op op = new Op(input != null ? input : new Input());
     try (BatchUpdate u = batchUpdateFactory.create(dbProvider.get(),
         req.getChange().getProject(), ctl.getUser(), TimeUtil.nowTs())) {
       u.addOp(req.getId(), op);
@@ -86,25 +85,23 @@ public class PutTopic implements RestModifyView<ChangeResource, Input>,
 
   private class Op extends BatchUpdate.Op {
     private final Input input;
-    private final IdentifiedUser caller;
 
     private Change change;
     private String oldTopicName;
     private String newTopicName;
 
-    public Op(ChangeControl ctl, Input input) {
+    public Op(Input input) {
       this.input = input;
-      this.caller = ctl.getUser().asIdentifiedUser();
     }
 
     @Override
-    public void updateChange(ChangeContext ctx) throws OrmException {
+    public boolean updateChange(ChangeContext ctx) throws OrmException {
       change = ctx.getChange();
       ChangeUpdate update = ctx.getUpdate(change.currentPatchSetId());
       newTopicName = Strings.nullToEmpty(input.topic);
       oldTopicName = Strings.nullToEmpty(change.getTopic());
       if (oldTopicName.equals(newTopicName)) {
-        return;
+        return false;
       }
       String summary;
       if (oldTopicName.isEmpty()) {
@@ -117,24 +114,27 @@ public class PutTopic implements RestModifyView<ChangeResource, Input>,
       }
       change.setTopic(Strings.emptyToNull(newTopicName));
       update.setTopic(change.getTopic());
-      ChangeUtil.updated(change);
       ctx.saveChange();
 
       ChangeMessage cmsg = new ChangeMessage(
           new ChangeMessage.Key(
               change.getId(),
               ChangeUtil.messageUUID(ctx.getDb())),
-          caller.getAccountId(), ctx.getWhen(),
+          ctx.getUser().getAccountId(), ctx.getWhen(),
           change.currentPatchSetId());
       cmsg.setMessage(summary);
       cmUtil.addChangeMessage(ctx.getDb(), update, cmsg);
+      return true;
     }
 
     @Override
     public void postUpdate(Context ctx) throws OrmException {
       if (change != null) {
-        hooks.doTopicChangedHook(change, caller.getAccount(),
-            oldTopicName, ctx.getDb());
+        hooks.doTopicChangedHook(
+            change,
+            ctx.getUser().asIdentifiedUser().getAccount(),
+            oldTopicName,
+            ctx.getDb());
       }
     }
   }

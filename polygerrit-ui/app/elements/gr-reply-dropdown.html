@@ -35,7 +35,7 @@ limitations under the License.
     iron-dropdown {
       background-color: #fff;
       box-shadow: 0 1px 5px rgba(0, 0, 0, .3);
-      max-width: 40em;
+      width: 40em;
     }
     button {
       background-color: #f1f2f3;
@@ -237,7 +237,9 @@ limitations under the License.
 
       _computeIndexOfLabelValue: function(
           labels, permittedLabels, labelName, account) {
-        var labelValue = labels[labelName].default_value;
+        var t = labels[labelName];
+        if (!t) { return null; }
+        var labelValue = t.default_value;
 
         // Is there an existing vote for the current user? If so, use that.
         var votes = labels[labelName];

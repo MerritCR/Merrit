@@ -32,6 +32,7 @@ import com.google.gerrit.reviewdb.server.ReviewDb;
 import com.google.gerrit.server.ChangeMessagesUtil;
 import com.google.gerrit.server.ChangeUtil;
 import com.google.gerrit.server.IdentifiedUser;
+import com.google.gerrit.server.PatchSetUtil;
 import com.google.gerrit.server.git.BatchUpdate;
 import com.google.gerrit.server.git.BatchUpdate.ChangeContext;
 import com.google.gerrit.server.git.BatchUpdate.Context;
@@ -58,6 +59,7 @@ public class Abandon implements RestModifyView<ChangeResource, AbandonInput>,
   private final Provider<ReviewDb> dbProvider;
   private final ChangeJson.Factory json;
   private final ChangeMessagesUtil cmUtil;
+  private final PatchSetUtil psUtil;
   private final BatchUpdate.Factory batchUpdateFactory;
 
   @Inject
@@ -66,12 +68,14 @@ public class Abandon implements RestModifyView<ChangeResource, AbandonInput>,
       Provider<ReviewDb> dbProvider,
       ChangeJson.Factory json,
       ChangeMessagesUtil cmUtil,
+      PatchSetUtil psUtil,
       BatchUpdate.Factory batchUpdateFactory) {
     this.hooks = hooks;
     this.abandonedSenderFactory = abandonedSenderFactory;
     this.dbProvider = dbProvider;
     this.json = json;
     this.cmUtil = cmUtil;
+    this.psUtil = psUtil;
     this.batchUpdateFactory = batchUpdateFactory;
   }
 
@@ -114,7 +118,7 @@ public class Abandon implements RestModifyView<ChangeResource, AbandonInput>,
     }
 
     @Override
-    public void updateChange(ChangeContext ctx) throws OrmException,
+    public boolean updateChange(ChangeContext ctx) throws OrmException,
         ResourceConflictException {
       change = ctx.getChange();
       PatchSet.Id psId = change.currentPatchSetId();
@@ -125,7 +129,7 @@ public class Abandon implements RestModifyView<ChangeResource, AbandonInput>,
         throw new ResourceConflictException(
             "draft changes cannot be abandoned");
       }
-      patchSet = ctx.getDb().patchSets().get(psId);
+      patchSet = psUtil.get(ctx.getDb(), ctx.getNotes(), psId);
       change.setStatus(Change.Status.ABANDONED);
       change.setLastUpdatedOn(ctx.getWhen());
       ctx.saveChange();
@@ -133,6 +137,7 @@ public class Abandon implements RestModifyView<ChangeResource, AbandonInput>,
       update.setStatus(change.getStatus());
       message = newMessage(ctx.getDb());
       cmUtil.addChangeMessage(ctx.getDb(), update, message);
+      return true;
     }
 
     private ChangeMessage newMessage(ReviewDb db) throws OrmException {

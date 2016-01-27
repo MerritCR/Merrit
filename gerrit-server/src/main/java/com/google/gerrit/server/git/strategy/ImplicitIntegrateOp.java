@@ -1,4 +1,4 @@
-// Copyright (C) 2014 The Android Open Source Project
+// Copyright (C) 2016 The Android Open Source Project
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,20 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package com.google.gerrit.server.git;
+package com.google.gerrit.server.git.strategy;
 
-import static java.lang.annotation.RetentionPolicy.RUNTIME;
-
-import com.google.gerrit.server.change.EmailReviewComments;
-import com.google.inject.BindingAnnotation;
-
-import java.lang.annotation.Retention;
+import com.google.gerrit.server.git.CodeReviewCommit;
 
 /**
- * Marker on the global {@link WorkQueue.Executor} used by
- * {@link EmailReviewComments}.
+ * Operation for a change that is implicitly integrated by integrating another
+ * commit.
+ * <p>
+ * Updates the change status and message based on {@link
+ * CodeReviewCommit#getStatusCode()}, but does not touch the repository.
  */
-@Retention(RUNTIME)
-@BindingAnnotation
-public @interface EmailReviewCommentsExecutor {
+class ImplicitIntegrateOp extends SubmitStrategyOp {
+  ImplicitIntegrateOp(SubmitStrategy.Arguments args, CodeReviewCommit toMerge) {
+    super(args, toMerge);
+  }
 }

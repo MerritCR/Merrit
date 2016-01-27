@@ -44,6 +44,7 @@ limitations under the License.
             draft="[[comment.__draft]]"
             editing="[[!comment.message]]"
             show-actions="[[showActions]]"
+            project-config="[[projectConfig]]"
             on-height-change="_handleCommentHeightChange"
             on-reply="_handleCommentReply"
             on-discard="_handleCommentDiscard"
@@ -80,7 +81,12 @@ limitations under the License.
         patchNum: String,
         path: String,
         showActions: Boolean,
+        projectConfig: Object,
 
+        _boundWindowResizeHandler: {
+          type: Function,
+          value: function() { return this._handleWindowResize.bind(this); }
+        },
         _lastHeight: Number,
         _orderedComments: Array,
       },
@@ -92,6 +98,18 @@ limitations under the License.
       observers: [
         '_commentsChanged(comments.splices)',
       ],
+
+      attached: function() {
+        window.addEventListener('resize', this._boundWindowResizeHandler);
+      },
+
+      detached: function() {
+        window.removeEventListener('resize', this._boundWindowResizeHandler);
+      },
+
+      _handleWindowResize: function(e) {
+        this._heightChanged();
+      },
 
       _commentsChanged: function(changeRecord) {
         this._orderedComments = this._sortedComments(this.comments);

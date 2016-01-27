@@ -49,17 +49,6 @@ limitations under the License.
 
       assert.equal(element._computeOwnerLink({ _account_id: 42 }),
           '/q/owner:42+status:open');
-
-      assert.equal(element._computeAccountTitle(
-          {
-            name: 'Andrew Bonventre',
-            email: 'andybons+gerrit@gmail.com'
-          }),
-          'Andrew Bonventre <andybons+gerrit@gmail.com>');
-
-      assert.equal(element._computeAccountTitle(
-          { name: 'Andrew Bonventre' }),
-          'Andrew Bonventre');
     });
 
   });

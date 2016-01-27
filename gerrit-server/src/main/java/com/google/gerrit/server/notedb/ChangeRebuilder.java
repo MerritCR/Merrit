@@ -115,7 +115,7 @@ public class ChangeRebuilder {
         ArrayListMultimap.create();
 
     for (PatchSet ps : db.patchSets().byChange(changeId)) {
-      events.add(new PatchSetEvent(ps));
+      events.add(new PatchSetEvent(change, ps));
       for (PatchLineComment c : db.patchComments().byPatchSet(ps.getId())) {
         PatchLineCommentEvent e =
             new PatchLineCommentEvent(c, change, ps, patchListCache);
@@ -217,6 +217,13 @@ public class ChangeRebuilder {
       case NEW:
       case NO_CHANGE:
         break;
+      case FAST_FORWARD:
+      case IO_FAILURE:
+      case LOCK_FAILURE:
+      case NOT_ATTEMPTED:
+      case REJECTED:
+      case REJECTED_CURRENT_BRANCH:
+      case RENAMED:
       default:
         throw new IOException(
             String.format("Failed to delete ref %s: %s", refName, result));
@@ -306,20 +313,24 @@ public class ChangeRebuilder {
   }
 
   private static class PatchSetEvent extends Event {
+    private final Change change;
     private final PatchSet ps;
 
-    PatchSetEvent(PatchSet ps) {
+    PatchSetEvent(Change change, PatchSet ps) {
       super(ps.getId(), ps.getUploader(), ps.getCreatedOn());
+      this.change = change;
       this.ps = ps;
     }
 
     @Override
     void apply(ChangeUpdate update) {
       checkUpdate(update);
+      update.setSubject(change.getSubject());
       if (ps.getPatchSetId() == 1) {
-        update.setSubject("Create change");
+        update.setSubjectForCommit("Create change");
+        update.setBranch(change.getDest().get());
       } else {
-        update.setSubject("Create patch set " + ps.getPatchSetId());
+        update.setSubjectForCommit("Create patch set " + ps.getPatchSetId());
       }
     }
   }

@@ -24,6 +24,7 @@ import com.google.gerrit.extensions.api.changes.SubmitInput;
 import com.google.gerrit.extensions.common.ChangeInfo;
 import com.google.gerrit.extensions.restapi.AuthException;
 import com.google.gerrit.extensions.restapi.ResourceConflictException;
+import com.google.gerrit.extensions.restapi.RestApiException;
 import com.google.gerrit.extensions.restapi.RestModifyView;
 import com.google.gerrit.extensions.restapi.UnprocessableEntityException;
 import com.google.gerrit.extensions.webui.UiAction;
@@ -157,9 +158,8 @@ public class Submit implements RestModifyView<RevisionResource, SubmitInput>,
 
   @Override
   public Output apply(RevisionResource rsrc, SubmitInput input)
-      throws AuthException, ResourceConflictException,
-      RepositoryNotFoundException, IOException, OrmException,
-      UnprocessableEntityException {
+      throws RestApiException, RepositoryNotFoundException, IOException,
+      OrmException {
     input.onBehalfOf = Strings.emptyToNull(input.onBehalfOf);
     if (input.onBehalfOf != null) {
       rsrc = onBehalfOf(rsrc, input);
@@ -200,6 +200,8 @@ public class Submit implements RestModifyView<RevisionResource, SubmitInput>,
           throw new ResourceConflictException(msg.getMessage());
         }
         //$FALL-THROUGH$
+      case ABANDONED:
+      case DRAFT:
       default:
         throw new ResourceConflictException("change is " + status(change));
     }
@@ -430,9 +432,8 @@ public class Submit implements RestModifyView<RevisionResource, SubmitInput>,
 
     @Override
     public ChangeInfo apply(ChangeResource rsrc, SubmitInput input)
-        throws AuthException, ResourceConflictException,
-        RepositoryNotFoundException, IOException, OrmException,
-        UnprocessableEntityException {
+        throws RestApiException, RepositoryNotFoundException, IOException,
+        OrmException {
       PatchSet ps = dbProvider.get().patchSets()
         .get(rsrc.getChange().currentPatchSetId());
       if (ps == null) {

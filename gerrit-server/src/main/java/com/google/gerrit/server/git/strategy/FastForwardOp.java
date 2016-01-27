@@ -14,27 +14,20 @@
 
 package com.google.gerrit.server.git.strategy;
 
-import com.google.gerrit.server.git.BatchUpdate;
 import com.google.gerrit.server.git.BatchUpdate.RepoContext;
 import com.google.gerrit.server.git.CodeReviewCommit;
 import com.google.gerrit.server.git.IntegrationException;
-import com.google.gerrit.server.git.MergeTip;
 
 import java.io.IOException;
 
-class FastForwardOp extends BatchUpdate.Op {
-  private final MergeTip mergeTip;
-  private final CodeReviewCommit toMerge;
-
-  FastForwardOp(MergeTip mergeTip,
-      CodeReviewCommit toMerge) {
-    this.mergeTip = mergeTip;
-    this.toMerge = toMerge;
+class FastForwardOp extends SubmitStrategyOp {
+  FastForwardOp(SubmitStrategy.Arguments args, CodeReviewCommit toMerge) {
+    super(args, toMerge);
   }
 
   @Override
-  public void updateRepo(RepoContext ctx)
+  public void updateRepoImpl(RepoContext ctx)
       throws IntegrationException, IOException {
-    mergeTip.moveTipTo(toMerge, toMerge);
+    args.mergeTip.moveTipTo(toMerge, toMerge);
   }
 }
