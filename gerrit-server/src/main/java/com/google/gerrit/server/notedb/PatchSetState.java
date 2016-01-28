@@ -1,4 +1,4 @@
-// Copyright (C) 2015 The Android Open Source Project
+// Copyright (C) 2016 The Android Open Source Project
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,22 +12,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package com.google.gerrit.server.git;
+package com.google.gerrit.server.notedb;
 
-public class UserConfigSections {
+public enum PatchSetState {
+  /** Published and visible to anyone who can see the change; the default.*/
+  PUBLISHED,
 
-  /** The general user preferences. */
-  public static final String GENERAL = "general";
+  /** Draft patch set, only visible to certain users. */
+  DRAFT,
 
-  /** The my menu user preferences. */
-  public static final String MY = "my";
-
-  /** The edit user preferences. */
-  public static final String EDIT = "edit";
-
-  /** The diff user preferences. */
-  public static final String DIFF = "diff";
-
-  private UserConfigSections() {
-  }
+  /**
+   * Deleted patch set.
+   * <p>
+   * Used internally as a tombstone; patch sets exposed by public notedb
+   * interfaces never have this state.
+   */
+  DELETED;
 }
