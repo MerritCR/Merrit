@@ -18,14 +18,14 @@ limitations under the License.
 <meta name="viewport" content="width=device-width, minimum-scale=1.0, initial-scale=1.0, user-scalable=yes">
 <title>gr-file-list</title>
 
-<script src="../../bower_components/webcomponentsjs/webcomponents.min.js"></script>
-<script src="../../bower_components/web-component-tester/browser.js"></script>
-<script src="../../bower_components/page/page.js"></script>
+<script src="../bower_components/webcomponentsjs/webcomponents.min.js"></script>
+<script src="../bower_components/web-component-tester/browser.js"></script>
+<script src="../bower_components/page/page.js"></script>
 <script src="../scripts/changes.js"></script>
 <script src="../scripts/fake-app.js"></script>
 <script src="../scripts/util.js"></script>
 
-<link rel="import" href="../../bower_components/iron-test-helpers/iron-test-helpers.html">
+<link rel="import" href="../bower_components/iron-test-helpers/iron-test-helpers.html">
 <link rel="import" href="../elements/gr-file-list.html">
 
 <test-fixture id="basic">
@@ -120,6 +120,46 @@ limitations under the License.
               ['/COMMIT_MSG', 'file_added_in_rev2.txt', 'myfile.txt']);
           done();
         }, 1);
+      }, 1);
+    });
+
+    test('keyboard shortcuts', function(done) {
+      element.changeNum = '42';
+      element.patchNum = '2';
+      element.selectedIndex = 0;
+      element.reload();
+      server.respond();
+
+      element.async(function() {
+        var elementItems = Polymer.dom(element.root).querySelectorAll(
+            '.fileRow');
+        assert.equal(elementItems.length, 3);
+        assert.isTrue(elementItems[0].hasAttribute('selected'));
+        assert.isFalse(elementItems[1].hasAttribute('selected'));
+        assert.isFalse(elementItems[2].hasAttribute('selected'));
+        MockInteractions.pressAndReleaseKeyOn(element, 74);  // 'j'
+        assert.equal(element.selectedIndex, 1);
+        MockInteractions.pressAndReleaseKeyOn(element, 74);  // 'j'
+
+        var showStub = sinon.stub(page, 'show');
+        assert.equal(element.selectedIndex, 2);
+        MockInteractions.pressAndReleaseKeyOn(element, 13);  // 'enter'
+        assert(showStub.lastCall.calledWith('/c/42/2/myfile.txt'),
+            'Should navigate to /c/42/2/myfile.txt');
+
+        MockInteractions.pressAndReleaseKeyOn(element, 75);  // 'k'
+        assert.equal(element.selectedIndex, 1);
+        MockInteractions.pressAndReleaseKeyOn(element, 79);  // 'o'
+        assert(showStub.lastCall.calledWith('/c/42/2/file_added_in_rev2.txt'),
+            'Should navigate to /c/42/2/file_added_in_rev2.txt');
+
+        MockInteractions.pressAndReleaseKeyOn(element, 75);  // 'k'
+        MockInteractions.pressAndReleaseKeyOn(element, 75);  // 'k'
+        MockInteractions.pressAndReleaseKeyOn(element, 75);  // 'k'
+        assert.equal(element.selectedIndex, 0);
+
+        showStub.restore();
+        done();
       }, 1);
     });
 

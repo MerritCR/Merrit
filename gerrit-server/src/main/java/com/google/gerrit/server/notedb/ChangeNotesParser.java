@@ -64,8 +64,10 @@ import org.eclipse.jgit.errors.ConfigInvalidException;
 import org.eclipse.jgit.errors.InvalidObjectIdException;
 import org.eclipse.jgit.errors.RepositoryNotFoundException;
 import org.eclipse.jgit.lib.ObjectId;
+import org.eclipse.jgit.lib.ObjectReader;
 import org.eclipse.jgit.lib.PersonIdent;
 import org.eclipse.jgit.lib.Repository;
+import org.eclipse.jgit.notes.Note;
 import org.eclipse.jgit.notes.NoteMap;
 import org.eclipse.jgit.revwalk.FooterKey;
 import org.eclipse.jgit.revwalk.RevCommit;
@@ -81,6 +83,7 @@ import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.NavigableSet;
 import java.util.Set;
 import java.util.TreeMap;
 
@@ -96,7 +99,8 @@ class ChangeNotesParser implements AutoCloseable {
   final Multimap<RevId, PatchLineComment> comments;
   final TreeMap<PatchSet.Id, PatchSet> patchSets;
   final Map<PatchSet.Id, PatchSetState> patchSetStates;
-  NoteMap commentNoteMap;
+  final Map<RevId, RevisionNote> revisionNotes;
+
   String branch;
   Change.Status status;
   String topic;
@@ -108,6 +112,7 @@ class ChangeNotesParser implements AutoCloseable {
   String originalSubject;
   String submissionId;
   PatchSet.Id currentPatchSetId;
+  NoteMap noteMap;
 
   private final Change.Id changeId;
   private final ObjectId tip;
@@ -119,8 +124,8 @@ class ChangeNotesParser implements AutoCloseable {
   private final Multimap<PatchSet.Id, ChangeMessage> changeMessagesByPatchSet;
 
   ChangeNotesParser(Change change, ObjectId tip, RevWalk walk,
-      GitRepositoryManager repoManager) throws RepositoryNotFoundException,
-      IOException {
+      GitRepositoryManager repoManager)
+      throws RepositoryNotFoundException, IOException {
     this.changeId = change.getId();
     this.tip = tip;
     this.walk = walk;
@@ -134,6 +139,7 @@ class ChangeNotesParser implements AutoCloseable {
     comments = ArrayListMultimap.create();
     patchSets = Maps.newTreeMap(ReviewDbUtil.intKeyOrdering());
     patchSetStates = Maps.newHashMap();
+    revisionNotes = Maps.newHashMap();
   }
 
   @Override
@@ -146,7 +152,7 @@ class ChangeNotesParser implements AutoCloseable {
     for (RevCommit commit : walk) {
       parse(commit);
     }
-    parseComments();
+    parseNotes();
     allPastReviewers.addAll(reviewers.keySet());
     pruneReviewers();
     updatePatchSetStates();
@@ -459,11 +465,27 @@ class ChangeNotesParser implements AutoCloseable {
     allChangeMessages.add(changeMessage);
   }
 
-  private void parseComments()
+  private void parseNotes()
       throws IOException, ConfigInvalidException {
-    commentNoteMap = CommentsInNotesUtil.parseCommentsFromNotes(repo,
-        ChangeNoteUtil.changeRefName(changeId), walk, changeId,
-        comments, PatchLineComment.Status.PUBLISHED);
+    ObjectReader reader = walk.getObjectReader();
+    RevCommit tipCommit = walk.parseCommit(tip);
+    noteMap = NoteMap.read(reader, tipCommit);
+
+    for (Note note : noteMap) {
+      RevisionNote rn = new RevisionNote(changeId, reader, note.getData());
+      RevId revId = new RevId(note.name());
+      revisionNotes.put(revId, rn);
+      for (PatchLineComment plc : rn.comments) {
+        comments.put(revId, plc);
+      }
+    }
+
+    for (PatchSet ps : patchSets.values()) {
+      RevisionNote rn = revisionNotes.get(ps.getRevision());
+      if (rn != null && rn.pushCert != null) {
+        ps.setPushCertificate(rn.pushCert);
+      }
+    }
   }
 
   private void parseApproval(PatchSet.Id psId, Account.Id accountId,
@@ -620,17 +642,12 @@ class ChangeNotesParser implements AutoCloseable {
 
   private Account.Id parseIdent(PersonIdent ident)
       throws ConfigInvalidException {
-    String email = ident.getEmailAddress();
-    int at = email.indexOf('@');
-    if (at >= 0) {
-      String host = email.substring(at + 1, email.length());
-      Integer id = Ints.tryParse(email.substring(0, at));
-      if (id != null && host.equals(GERRIT_PLACEHOLDER_HOST)) {
-        return new Account.Id(id);
-      }
+    Account.Id id = ChangeNoteUtil.parseIdent(ident);
+    if (id == null) {
+      throw parseException("invalid identity, expected <id>@%s: %s",
+          GERRIT_PLACEHOLDER_HOST, ident.getEmailAddress());
     }
-    throw parseException("invalid identity, expected <id>@%s: %s",
-      GERRIT_PLACEHOLDER_HOST, email);
+    return id;
   }
 
   private void parseReviewer(ReviewerStateInternal state, String line)
@@ -666,9 +683,11 @@ class ChangeNotesParser implements AutoCloseable {
             FOOTER_COMMIT, ps.getPatchSetId());
       }
     }
+    if (patchSetStates.isEmpty()) {
+      return;
+    }
 
-    Set<PatchSet.Id> deleted =
-        Sets.newHashSetWithExpectedSize(patchSetStates.size());
+    boolean deleted = false;
     for (Map.Entry<PatchSet.Id, PatchSetState> e : patchSetStates.entrySet()) {
       switch (e.getValue()) {
         case PUBLISHED:
@@ -676,7 +695,8 @@ class ChangeNotesParser implements AutoCloseable {
           break;
 
         case DELETED:
-          deleted.add(e.getKey());
+          deleted = true;
+          patchSets.remove(e.getKey());
           break;
 
         case DRAFT:
@@ -687,32 +707,32 @@ class ChangeNotesParser implements AutoCloseable {
           break;
       }
     }
-    if (deleted.isEmpty()) {
+    if (!deleted) {
       return;
     }
 
     // Post-process other collections to remove items corresponding to deleted
     // patch sets. This is safer than trying to prevent insertion, as it will
     // also filter out items racily added after the patch set was deleted.
-    patchSets.keySet().removeAll(deleted);
-    if (!patchSets.keySet().isEmpty()) {
-      currentPatchSetId = patchSets.navigableKeySet().last();
+    NavigableSet<PatchSet.Id> all = patchSets.navigableKeySet();
+    if (!all.isEmpty()) {
+      currentPatchSetId = all.last();
     } else {
       currentPatchSetId = null;
     }
-    approvals.keySet().removeAll(deleted);
-    changeMessagesByPatchSet.keys().removeAll(deleted);
+    approvals.keySet().retainAll(all);
+    changeMessagesByPatchSet.keys().retainAll(all);
 
     for (Iterator<ChangeMessage> it = allChangeMessages.iterator();
         it.hasNext();) {
-      if (deleted.contains(it.next().getPatchSetId())) {
+      if (!all.contains(it.next().getPatchSetId())) {
         it.remove();
       }
     }
     for (Iterator<PatchLineComment> it = comments.values().iterator();
         it.hasNext();) {
       PatchSet.Id psId = it.next().getKey().getParentKey().getParentKey();
-      if (deleted.contains(psId)) {
+      if (!all.contains(psId)) {
         it.remove();
       }
     }

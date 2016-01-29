@@ -18,14 +18,14 @@ limitations under the License.
 <meta name="viewport" content="width=device-width, minimum-scale=1.0, initial-scale=1.0, user-scalable=yes">
 <title>gr-change-list</title>
 
-<script src="../../bower_components/webcomponentsjs/webcomponents-lite.min.js"></script>
-<script src="../../bower_components/web-component-tester/browser.js"></script>
-<script src="../../bower_components/page/page.js"></script>
+<script src="../bower_components/webcomponentsjs/webcomponents-lite.min.js"></script>
+<script src="../bower_components/web-component-tester/browser.js"></script>
+<script src="../bower_components/page/page.js"></script>
 <script src="../scripts/fake-app.js"></script>
 <script src="../scripts/changes.js"></script>
 <script src="../scripts/util.js"></script>
 
-<link rel="import" href="../../bower_components/iron-test-helpers/iron-test-helpers.html">
+<link rel="import" href="../bower_components/iron-test-helpers/iron-test-helpers.html">
 <link rel="import" href="../elements/gr-change-list.html">
 
 <test-fixture id="basic">
@@ -67,6 +67,7 @@ limitations under the License.
     });
 
     test('keyboard shortcuts', function(done) {
+      element.selectedIndex = 0;
       element.changes = [
         {_number: 0},
         {_number: 1},
@@ -76,7 +77,6 @@ limitations under the License.
       var elementItems = Polymer.dom(element.root).querySelectorAll(
           'gr-change-list-item');
       assert.equal(elementItems.length, 3);
-      assert.equal(element.selectedIndex, 0);
 
       element.async(function() {
         assert.isTrue(elementItems[0].selected);
@@ -116,6 +116,7 @@ limitations under the License.
     });
 
     test('keyboard shortcuts', function() {
+      element.selectedIndex = 0;
       element.groups = [
         [
           {_number: 0},
@@ -138,7 +139,6 @@ limitations under the License.
       var elementItems = Polymer.dom(element.root).querySelectorAll(
           'gr-change-list-item');
       assert.equal(elementItems.length, 9);
-      assert.equal(element.selectedIndex, 0);
 
       MockInteractions.pressAndReleaseKeyOn(element, 74);  // 'j'
       assert.equal(element.selectedIndex, 1);

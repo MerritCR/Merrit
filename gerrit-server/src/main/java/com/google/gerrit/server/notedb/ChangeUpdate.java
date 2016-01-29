@@ -15,6 +15,7 @@
 package com.google.gerrit.server.notedb;
 
 import static com.google.common.base.Preconditions.checkArgument;
+import static com.google.common.base.Preconditions.checkState;
 import static com.google.gerrit.server.notedb.ChangeNoteUtil.FOOTER_BRANCH;
 import static com.google.gerrit.server.notedb.ChangeNoteUtil.FOOTER_COMMIT;
 import static com.google.gerrit.server.notedb.ChangeNoteUtil.FOOTER_GROUPS;
@@ -26,7 +27,7 @@ import static com.google.gerrit.server.notedb.ChangeNoteUtil.FOOTER_SUBJECT;
 import static com.google.gerrit.server.notedb.ChangeNoteUtil.FOOTER_SUBMISSION_ID;
 import static com.google.gerrit.server.notedb.ChangeNoteUtil.FOOTER_SUBMITTED_WITH;
 import static com.google.gerrit.server.notedb.ChangeNoteUtil.FOOTER_TOPIC;
-import static com.google.gerrit.server.notedb.CommentsInNotesUtil.addCommentToMap;
+import static org.eclipse.jgit.lib.Constants.OBJ_BLOB;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Function;
@@ -67,10 +68,9 @@ import org.eclipse.jgit.revwalk.RevCommit;
 import org.eclipse.jgit.revwalk.RevWalk;
 
 import java.io.IOException;
-import java.util.ArrayList;
-import java.util.Collection;
 import java.util.Comparator;
 import java.util.Date;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -114,6 +114,7 @@ public class ChangeUpdate extends AbstractChangeUpdate {
   private ChangeNotes notes;
   private PatchSetState psState;
   private Iterable<String> groups;
+  private String pushCert;
 
   private final ChangeDraftUpdate.Factory draftUpdateFactory;
   private ChangeDraftUpdate draftUpdate;
@@ -369,10 +370,16 @@ public class ChangeUpdate extends AbstractChangeUpdate {
   }
 
   public void setCommit(RevWalk rw, ObjectId id) throws IOException {
+    setCommit(rw, id, null);
+  }
+
+  public void setCommit(RevWalk rw, ObjectId id, String pushCert)
+      throws IOException {
     RevCommit commit = rw.parseCommit(id);
     rw.parseBody(commit);
     this.commit = commit;
     subject = commit.getShortMessage();
+    this.pushCert = pushCert;
   }
 
   public void setHashtags(Set<String> hashtags) {
@@ -397,30 +404,43 @@ public class ChangeUpdate extends AbstractChangeUpdate {
   }
 
   /** @return the tree id for the updated tree */
-  private ObjectId storeCommentsInNotes() throws OrmException, IOException {
+  private ObjectId storeRevisionNotes() throws OrmException, IOException {
     ChangeNotes notes = ctl.getNotes().load();
     NoteMap noteMap = notes.getNoteMap();
     if (noteMap == null) {
       noteMap = NoteMap.newEmptyMap();
     }
-    if (comments.isEmpty()) {
+    if (comments.isEmpty() && pushCert == null) {
       return null;
     }
 
-    Map<RevId, List<PatchLineComment>> allComments = Maps.newHashMap();
-    for (Map.Entry<RevId, Collection<PatchLineComment>> e
-        : notes.getComments().asMap().entrySet()) {
-      List<PatchLineComment> comments = new ArrayList<>();
-      for (PatchLineComment c : e.getValue()) {
-        comments.add(c);
-      }
-      allComments.put(e.getKey(), comments);
-    }
+    Map<RevId, RevisionNoteBuilder> builders = new HashMap<>();
     for (PatchLineComment c : comments) {
-      addCommentToMap(allComments, c);
+      builder(builders, c.getRevId()).addComment(c);
     }
-    commentsUtil.writeCommentsToNoteMap(noteMap, allComments, inserter);
+    if (pushCert != null) {
+      checkState(commit != null);
+      builder(builders, new RevId(commit.name())).setPushCertificate(pushCert);
+    }
+
+    for (Map.Entry<RevId, RevisionNoteBuilder> e : builders.entrySet()) {
+      ObjectId data = inserter.insert(
+          OBJ_BLOB, e.getValue().build(commentsUtil));
+      noteMap.set(ObjectId.fromString(e.getKey().get()), data);
+    }
+
     return noteMap.writeTree(inserter);
+  }
+
+  private RevisionNoteBuilder builder(Map<RevId, RevisionNoteBuilder> builders,
+      RevId revId) {
+    RevisionNoteBuilder b = builders.get(revId);
+    if (b == null) {
+      b = new RevisionNoteBuilder(
+          getChangeNotes().getRevisionNotes().get(revId));
+      builders.put(revId, b);
+    }
+    return b;
   }
 
   public RevCommit commit() throws IOException {
@@ -441,7 +461,7 @@ public class ChangeUpdate extends AbstractChangeUpdate {
       IOException {
     CommitBuilder builder = new CommitBuilder();
     if (migration.writeChanges()) {
-      ObjectId treeId = storeCommentsInNotes();
+      ObjectId treeId = storeRevisionNotes();
       if (treeId != null) {
         builder.setTreeId(treeId);
       }
@@ -577,7 +597,8 @@ public class ChangeUpdate extends AbstractChangeUpdate {
     return getProjectName(ctl);
   }
 
-  private boolean isEmpty() {
+  @Override
+  public boolean isEmpty() {
     return commitSubject == null
         && approvals.isEmpty()
         && changeMessage == null
