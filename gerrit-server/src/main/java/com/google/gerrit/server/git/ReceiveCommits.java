@@ -62,6 +62,7 @@ import com.google.gerrit.common.data.LabelTypes;
 import com.google.gerrit.common.data.Permission;
 import com.google.gerrit.common.data.PermissionRule;
 import com.google.gerrit.extensions.api.changes.HashtagsInput;
+import com.google.gerrit.extensions.api.changes.ReviewInput.NotifyHandling;
 import com.google.gerrit.extensions.registration.DynamicMap;
 import com.google.gerrit.extensions.registration.DynamicMap.Entry;
 import com.google.gerrit.extensions.registration.DynamicSet;
@@ -1188,6 +1189,12 @@ public class ReceiveCommits {
     @Option(name = "--submit", usage = "immediately submit the change")
     boolean submit;
 
+    @Option(name = "--notify",
+        usage = "Notify handling that defines to whom email notifications "
+            + "should be sent. Allowed values are NONE, OWNER, "
+            + "OWNER_REVIEWERS, ALL. If not set, the default is ALL.")
+    NotifyHandling notify = NotifyHandling.ALL;
+
     @Option(name = "--reviewer", aliases = {"-r"}, metaVar = "EMAIL",
         usage = "add reviewer to changes")
     void reviewer(Account.Id id) {
@@ -1746,6 +1753,7 @@ public class ReceiveCommits {
           .setValidatePolicy(CommitValidators.Policy.NONE);
       cmd = new ReceiveCommand(ObjectId.zeroId(), c,
           ins.getPatchSetId().toRefName());
+      ins.setUpdateRefCommand(cmd);
     }
 
     CheckedFuture<Void, RestApiException> insertChange() {
@@ -1793,7 +1801,7 @@ public class ReceiveCommits {
             .setMessage(msg)
             .setRequestScopePropagator(requestScopePropagator)
             .setSendMail(true)
-            .setUpdateRef(false));
+            .setUpdateRef(true));
         if (magicBranch != null) {
           bu.addOp(
               changeId,
@@ -2372,6 +2380,9 @@ public class ReceiveCommits {
               cm.setFrom(me);
               cm.setPatchSet(newPatchSet, info);
               cm.setChangeMessage(msg);
+              if (magicBranch != null) {
+                cm.setNotify(magicBranch.notify);
+              }
               cm.addReviewers(recipients.getReviewers());
               cm.addExtraCC(recipients.getCcOnly());
               cm.send();

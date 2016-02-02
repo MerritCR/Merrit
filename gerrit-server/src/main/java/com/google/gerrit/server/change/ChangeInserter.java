@@ -22,6 +22,7 @@ import com.google.common.base.MoreObjects;
 import com.google.gerrit.common.ChangeHooks;
 import com.google.gerrit.common.FooterConstants;
 import com.google.gerrit.common.data.LabelTypes;
+import com.google.gerrit.extensions.api.changes.ReviewInput.NotifyHandling;
 import com.google.gerrit.extensions.restapi.ResourceConflictException;
 import com.google.gerrit.reviewdb.client.Account;
 import com.google.gerrit.reviewdb.client.Branch;
@@ -102,10 +103,12 @@ public class ChangeInserter extends BatchUpdate.InsertChangeOp {
   private Iterable<String> groups;
   private CommitValidators.Policy validatePolicy =
       CommitValidators.Policy.GERRIT;
+  private NotifyHandling notify = NotifyHandling.ALL;
   private Set<Account.Id> reviewers;
   private Set<Account.Id> extraCC;
   private Map<String, Short> approvals;
   private RequestScopePropagator requestScopePropagator;
+  private ReceiveCommand updateRefCommand;
   private boolean runHooks;
   private boolean sendMail;
   private boolean updateRef;
@@ -146,6 +149,7 @@ public class ChangeInserter extends BatchUpdate.InsertChangeOp {
     this.reviewers = Collections.emptySet();
     this.extraCC = Collections.emptySet();
     this.approvals = Collections.emptyMap();
+    this.updateRefCommand = null;
     this.runHooks = true;
     this.sendMail = true;
     this.updateRef = true;
@@ -206,6 +210,11 @@ public class ChangeInserter extends BatchUpdate.InsertChangeOp {
     return this;
   }
 
+  public ChangeInserter setNotify(NotifyHandling notify) {
+    this.notify = notify;
+    return this;
+  }
+
   public ChangeInserter setReviewers(Set<Account.Id> reviewers) {
     this.reviewers = reviewers;
     return this;
@@ -251,6 +260,10 @@ public class ChangeInserter extends BatchUpdate.InsertChangeOp {
     return this;
   }
 
+  public void setUpdateRefCommand(ReceiveCommand cmd) {
+    updateRefCommand = cmd;
+  }
+
   public PatchSet getPatchSet() {
     checkState(patchSet != null,
         "getPatchSet() only valid after creating change");
@@ -283,8 +296,12 @@ public class ChangeInserter extends BatchUpdate.InsertChangeOp {
     if (!updateRef) {
       return;
     }
-    ctx.addRefUpdate(
-        new ReceiveCommand(ObjectId.zeroId(), commit, psId.toRefName()));
+    if (updateRefCommand == null) {
+      ctx.addRefUpdate(
+          new ReceiveCommand(ObjectId.zeroId(), commit, psId.toRefName()));
+    } else {
+      ctx.addRefUpdate(updateRefCommand);
+    }
   }
 
   @Override
@@ -296,6 +313,7 @@ public class ChangeInserter extends BatchUpdate.InsertChangeOp {
     ctx.getChange().setCurrentPatchSet(patchSetInfo);
 
     ChangeUpdate update = ctx.getUpdate(psId);
+    update.setChangeId(change.getKey().get());
     update.setSubjectForCommit("Create change");
     update.setBranch(change.getDest().get());
     update.setTopic(change.getTopic());
@@ -346,6 +364,7 @@ public class ChangeInserter extends BatchUpdate.InsertChangeOp {
                 createChangeSenderFactory.create(change.getId());
             cm.setFrom(change.getOwner());
             cm.setPatchSet(patchSet, patchSetInfo);
+            cm.setNotify(notify);
             cm.addReviewers(reviewers);
             cm.addExtraCC(extraCC);
             cm.send();
