@@ -14,21 +14,21 @@
 
 package com.google.gerrit.acceptance.rest.change;
 
-import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.collect.Iterables.getOnlyElement;
 import static com.google.common.truth.Truth.assertThat;
 import static com.google.common.truth.Truth.assert_;
 import static com.google.common.truth.TruthJUnit.assume;
 import static com.google.gerrit.extensions.client.ListChangesOption.CURRENT_REVISION;
 import static com.google.gerrit.extensions.client.ListChangesOption.DETAILED_LABELS;
+import static org.junit.Assert.fail;
 
-import com.google.common.base.Strings;
+import com.google.common.base.Function;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import com.google.gerrit.acceptance.AbstractDaemonTest;
+import com.google.gerrit.acceptance.NoHttpd;
 import com.google.gerrit.acceptance.PushOneCommit;
-import com.google.gerrit.acceptance.RestResponse;
 import com.google.gerrit.acceptance.TestProjectInput;
 import com.google.gerrit.common.EventListener;
 import com.google.gerrit.common.EventSource;
@@ -40,7 +40,10 @@ import com.google.gerrit.extensions.client.InheritableBoolean;
 import com.google.gerrit.extensions.client.ListChangesOption;
 import com.google.gerrit.extensions.client.SubmitType;
 import com.google.gerrit.extensions.common.ChangeInfo;
+import com.google.gerrit.extensions.common.ChangeMessageInfo;
 import com.google.gerrit.extensions.common.LabelInfo;
+import com.google.gerrit.extensions.restapi.ResourceConflictException;
+import com.google.gerrit.extensions.restapi.RestApiException;
 import com.google.gerrit.reviewdb.client.Account;
 import com.google.gerrit.reviewdb.client.Change;
 import com.google.gerrit.reviewdb.client.PatchSet;
@@ -49,15 +52,15 @@ import com.google.gerrit.reviewdb.client.Project;
 import com.google.gerrit.server.ApprovalsUtil;
 import com.google.gerrit.server.CurrentUser;
 import com.google.gerrit.server.IdentifiedUser;
+import com.google.gerrit.server.data.ChangeAttribute;
+import com.google.gerrit.server.data.PatchSetAttribute;
 import com.google.gerrit.server.events.ChangeMergedEvent;
 import com.google.gerrit.server.events.Event;
 import com.google.gerrit.server.notedb.ChangeNotes;
 import com.google.gerrit.testutil.ConfigSuite;
-import com.google.gson.reflect.TypeToken;
 import com.google.gwtorm.server.OrmException;
 import com.google.inject.Inject;
 
-import org.apache.http.HttpStatus;
 import org.eclipse.jgit.diff.DiffFormatter;
 import org.eclipse.jgit.junit.TestRepository;
 import org.eclipse.jgit.lib.Config;
@@ -70,13 +73,19 @@ import org.eclipse.jgit.revwalk.RevWalk;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.util.List;
 import java.util.Map;
 
+@NoHttpd
 public abstract class AbstractSubmit extends AbstractDaemonTest {
+  private static final Logger log =
+      LoggerFactory.getLogger(AbstractSubmit.class);
+
   @ConfigSuite.Config
   public static Config submitWholeTopicEnabled() {
     return submitWholeTopicEnabledConfig();
@@ -96,26 +105,31 @@ public abstract class AbstractSubmit extends AbstractDaemonTest {
   @Inject
   EventSource source;
 
+  private EventListener eventListener;
+
   @Before
   public void setUp() throws Exception {
     mergeResults = Maps.newHashMap();
     CurrentUser listenerUser = factory.create(user.id);
-    source.addEventListener(new EventListener() {
-
+    eventListener = new EventListener() {
       @Override
       public void onEvent(Event event) {
-        if (event instanceof ChangeMergedEvent) {
-          ChangeMergedEvent changeMergedEvent = (ChangeMergedEvent) event;
-          mergeResults.put(changeMergedEvent.change.get().number,
-              changeMergedEvent.newRev);
+        if (!(event instanceof ChangeMergedEvent)) {
+          return;
         }
+        ChangeMergedEvent e = (ChangeMergedEvent) event;
+        ChangeAttribute c = e.change.get();
+        PatchSetAttribute ps = e.patchSet.get();
+        log.debug("Merged {},{} as {}", ps.number, c.number, e.newRev);
+        mergeResults.put(e.change.get().number, e.newRev);
       }
-
-    }, listenerUser);
+    };
+    source.addEventListener(eventListener, listenerUser);
   }
 
   @After
   public void cleanup() {
+    source.removeEventListener(eventListener);
     db.close();
   }
 
@@ -155,12 +169,20 @@ public abstract class AbstractSubmit extends AbstractDaemonTest {
   private void assertSubmitter(PushOneCommit.Result change) throws Exception {
     ChangeInfo info = get(change.getChangeId(), ListChangesOption.MESSAGES);
     assertThat(info.messages).isNotNull();
-    assertThat(info.messages).hasSize(3);
+    Iterable<String> messages = Iterables.transform(info.messages,
+        new Function<ChangeMessageInfo, String>() {
+          @Override
+          public String apply(ChangeMessageInfo in) {
+            return in.message;
+          }
+        });
+    assertThat(messages).hasSize(3);
+    String last = Iterables.getLast(messages);
     if (getSubmitType() == SubmitType.CHERRY_PICK) {
-      assertThat(Iterables.getLast(info.messages).message).startsWith(
+      assertThat(last).startsWith(
           "Change has been successfully cherry-picked as ");
     } else {
-      assertThat(Iterables.getLast(info.messages).message).isEqualTo(
+      assertThat(last).isEqualTo(
           "Change has been successfully merged by Administrator");
     }
   }
@@ -197,55 +219,59 @@ public abstract class AbstractSubmit extends AbstractDaemonTest {
   }
 
   protected void submit(String changeId) throws Exception {
-    submit(changeId, HttpStatus.SC_OK, null);
+    submit(changeId, new SubmitInput(), null, null, true);
+  }
+
+  protected void submit(String changeId, SubmitInput input) throws Exception {
+    submit(changeId, input, null, null, true);
   }
 
   protected void submitWithConflict(String changeId,
       String expectedError) throws Exception {
-    submit(changeId, HttpStatus.SC_CONFLICT, expectedError);
+    submit(changeId, new SubmitInput(), ResourceConflictException.class,
+        expectedError, true);
   }
 
-  private void submit(String changeId, int expectedStatus, String msg)
-      throws Exception {
+  protected void submit(String changeId, SubmitInput input,
+      Class<? extends RestApiException> expectedExceptionType,
+      String expectedExceptionMsg, boolean checkMergeResult) throws Exception {
     approve(changeId);
-    SubmitInput subm = new SubmitInput();
-    RestResponse r =
-        adminSession.post("/changes/" + changeId + "/submit", subm);
-    assertThat(r.getStatusCode())
-        .named("Status code [" + r.getEntityContent() + "]")
-        .isEqualTo(expectedStatus);
-    if (expectedStatus == HttpStatus.SC_OK) {
-      checkArgument(msg == null, "msg must be null for successful submits");
-      ChangeInfo change =
-          newGson().fromJson(r.getReader(),
-              new TypeToken<ChangeInfo>() {}.getType());
-      assertThat(change.status).isEqualTo(ChangeStatus.MERGED);
-
-      checkMergeResult(change);
-    } else {
-      checkArgument(!Strings.isNullOrEmpty(msg), "msg must be a valid string " +
-          "containing an error message for unsuccessful submits");
-      assertThat(r.getEntityContent()).isEqualTo(msg);
+    try {
+      gApi.changes().id(changeId).current().submit(input);
+      if (expectedExceptionType != null) {
+        fail("Expected exception of type "
+            + expectedExceptionType.getSimpleName());
+      }
+    } catch (RestApiException e) {
+      if (expectedExceptionType == null) {
+        throw e;
+      }
+      // More verbose than using assertThat and/or ExpectedException, but gives
+      // us the stack trace.
+      if (!expectedExceptionType.isAssignableFrom(e.getClass())
+          || !e.getMessage().equals(expectedExceptionMsg)) {
+        throw new AssertionError("Expected exception of type "
+            + expectedExceptionType.getSimpleName() + " with message: "
+            + expectedExceptionMsg, e);
+      }
+      return;
     }
-    r.consume();
+    ChangeInfo change = gApi.changes().id(changeId).info();
+    assertThat(change.status).isEqualTo(ChangeStatus.MERGED);
+    if (checkMergeResult) {
+      checkMergeResult(change);
+    }
   }
 
-  private void checkMergeResult(ChangeInfo change) throws IOException {
+  private void checkMergeResult(ChangeInfo change) throws Exception {
     // Get the revision of the branch after the submit to compare with the
     // newRev of the ChangeMergedEvent.
-    RestResponse b =
-        adminSession.get("/projects/" + change.project + "/branches/"
-            + change.branch);
-    if (b.getStatusCode() == HttpStatus.SC_OK) {
-      BranchInfo branch =
-          newGson().fromJson(b.getReader(),
-              new TypeToken<BranchInfo>() {}.getType());
-      assertThat(mergeResults).isNotEmpty();
-      String newRev = mergeResults.get(Integer.toString(change._number));
-      assertThat(newRev).isNotNull();
-      assertThat(branch.revision).isEqualTo(newRev);
-    }
-    b.consume();
+    BranchInfo branch = gApi.projects().name(change.project)
+        .branch(change.branch).get();
+    assertThat(mergeResults).isNotEmpty();
+    String newRev = mergeResults.get(Integer.toString(change._number));
+    assertThat(newRev).isNotNull();
+    assertThat(branch.revision).isEqualTo(newRev);
   }
 
   protected void assertCurrentRevision(String changeId, int expectedNum,
@@ -287,7 +313,7 @@ public abstract class AbstractSubmit extends AbstractDaemonTest {
 
   protected void assertSubmitter(String changeId, int psId)
       throws OrmException {
-    ChangeNotes cn = notesFactory.create(
+    ChangeNotes cn = notesFactory.create(db,
         getOnlyElement(queryProvider.get().byKeyPrefix(changeId)).change());
     PatchSetApproval submitter = approvalsUtil.getSubmitter(
         db, cn, new PatchSet.Id(cn.getChangeId(), psId));
@@ -298,7 +324,7 @@ public abstract class AbstractSubmit extends AbstractDaemonTest {
 
   protected void assertNoSubmitter(String changeId, int psId)
       throws OrmException {
-    ChangeNotes cn = notesFactory.create(
+    ChangeNotes cn = notesFactory.create(db,
         getOnlyElement(queryProvider.get().byKeyPrefix(changeId)).change());
     PatchSetApproval submitter = approvalsUtil.getSubmitter(
         db, cn, new PatchSet.Id(cn.getChangeId(), psId));

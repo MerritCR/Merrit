@@ -19,9 +19,9 @@ import static com.google.common.base.Preconditions.checkNotNull;
 import static com.google.common.base.Preconditions.checkState;
 
 import com.google.common.base.Throwables;
-import com.google.common.collect.ArrayListMultimap;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ListMultimap;
+import com.google.common.collect.MultimapBuilder;
 import com.google.common.util.concurrent.CheckedFuture;
 import com.google.gerrit.extensions.restapi.ResourceConflictException;
 import com.google.gerrit.extensions.restapi.ResourceNotFoundException;
@@ -397,6 +397,7 @@ public class BatchUpdate implements AutoCloseable {
   private final GitRepositoryManager repoManager;
   private final ChangeIndexer indexer;
   private final ChangeControl.GenericFactory changeControlFactory;
+  private final ChangeNotes.Factory changeNotesFactory;
   private final ChangeUpdate.Factory changeUpdateFactory;
   private final GitReferenceUpdated gitRefUpdated;
   private final NotesMigration notesMigration;
@@ -407,7 +408,8 @@ public class BatchUpdate implements AutoCloseable {
   private final Timestamp when;
   private final TimeZone tz;
 
-  private final ListMultimap<Change.Id, Op> ops = ArrayListMultimap.create();
+  private final ListMultimap<Change.Id, Op> ops =
+      MultimapBuilder.linkedHashKeys().arrayListValues().build();
   private final Map<Change.Id, Change> newChanges = new HashMap<>();
   private final List<CheckedFuture<?, IOException>> indexFutures =
       new ArrayList<>();
@@ -424,6 +426,7 @@ public class BatchUpdate implements AutoCloseable {
   BatchUpdate(GitRepositoryManager repoManager,
       ChangeIndexer indexer,
       ChangeControl.GenericFactory changeControlFactory,
+      ChangeNotes.Factory changeNotesFactory,
       ChangeUpdate.Factory changeUpdateFactory,
       GitReferenceUpdated gitRefUpdated,
       NotesMigration notesMigration,
@@ -437,6 +440,7 @@ public class BatchUpdate implements AutoCloseable {
     this.repoManager = repoManager;
     this.indexer = indexer;
     this.changeControlFactory = changeControlFactory;
+    this.changeNotesFactory = changeNotesFactory;
     this.changeUpdateFactory = changeUpdateFactory;
     this.gitRefUpdated = gitRefUpdated;
     this.notesMigration = notesMigration;
@@ -628,8 +632,9 @@ public class BatchUpdate implements AutoCloseable {
     // Pass in preloaded change to controlFor, to avoid:
     //  - reading from a db that does not belong to this update
     //  - attempting to read a change that doesn't exist yet
+    ChangeNotes notes = changeNotesFactory.createForNew(c);
     ChangeContext ctx = new ChangeContext(
-      changeControlFactory.controlFor(c, user), new BatchUpdateReviewDb(db));
+      changeControlFactory.controlFor(notes, user), new BatchUpdateReviewDb(db));
     if (notesMigration.readChanges()) {
       ctx.getNotes().load();
     }

@@ -77,6 +77,16 @@ public class ChangeControl {
       }
     }
 
+    public ChangeControl controlFor(ChangeNotes notes, CurrentUser user)
+        throws NoSuchChangeException {
+      try {
+        return projectControl.controlFor(notes.getProjectName(), user)
+            .controlFor(notes);
+      } catch (NoSuchProjectException | IOException e) {
+        throw new NoSuchChangeException(notes.getChangeId(), e);
+      }
+    }
+
     public ChangeControl validateFor(Change.Id changeId, CurrentUser user)
         throws NoSuchChangeException, OrmException {
       Change change = db.get().changes().get(changeId);
@@ -111,10 +121,11 @@ public class ChangeControl {
       ChangeData.Factory changeDataFactory,
       ChangeNotes.Factory notesFactory,
       ApprovalsUtil approvalsUtil,
+      ReviewDb db,
       @Assisted RefControl refControl,
       @Assisted Change change) {
     this(changeDataFactory, approvalsUtil, refControl,
-        notesFactory.create(change));
+        notesFactory.create(db, change));
   }
 
   @AssistedInject
