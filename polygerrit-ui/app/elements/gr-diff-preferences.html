@@ -157,7 +157,9 @@ limitations under the License.
         },
       },
 
-      observers: [ '_prefsChanged(prefs.*)' ],
+      observers: [
+        '_prefsChanged(prefs.*)',
+      ],
 
       _prefsChanged: function(changeRecord) {
         var prefs = changeRecord.base;
@@ -175,11 +177,11 @@ limitations under the License.
       },
 
       _handleSave: function() {
-        this.fire('save', null, {bubble: false});
+        this.fire('save', null, {bubbles: false});
       },
 
       _handleCancel: function() {
-        this.fire('cancel', null, {bubble: false});
+        this.fire('cancel', null, {bubbles: false});
       },
     });
   })();

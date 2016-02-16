@@ -15,6 +15,7 @@
 package com.google.gerrit.server.notedb;
 
 import static com.google.common.base.Preconditions.checkNotNull;
+import static com.google.common.base.Preconditions.checkState;
 import static com.google.gerrit.server.notedb.ChangeNoteUtil.GERRIT_PLACEHOLDER_HOST;
 
 import com.google.common.annotations.VisibleForTesting;
@@ -44,8 +45,12 @@ import com.google.gerrit.reviewdb.server.ReviewDbUtil;
 import com.google.gerrit.server.config.AllUsersName;
 import com.google.gerrit.server.config.AllUsersNameProvider;
 import com.google.gerrit.server.git.GitRepositoryManager;
+import com.google.gerrit.server.project.NoSuchChangeException;
+import com.google.gerrit.server.query.change.ChangeData;
+import com.google.gerrit.server.query.change.InternalChangeQuery;
 import com.google.gwtorm.server.OrmException;
 import com.google.inject.Inject;
+import com.google.inject.Provider;
 import com.google.inject.Singleton;
 
 import org.eclipse.jgit.errors.ConfigInvalidException;
@@ -54,9 +59,12 @@ import org.eclipse.jgit.lib.ObjectId;
 import org.eclipse.jgit.lib.PersonIdent;
 import org.eclipse.jgit.notes.NoteMap;
 import org.eclipse.jgit.revwalk.RevWalk;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.sql.Timestamp;
+import java.util.List;
 import java.util.Map;
 
 /** View of a single {@link Change} based on the log of its notes branch. */
@@ -102,30 +110,89 @@ public class ChangeNotes extends AbstractChangeNotes<ChangeNotes> {
 
   @Singleton
   public static class Factory {
+    private static final Logger log = LoggerFactory.getLogger(Factory.class);
+
     private final GitRepositoryManager repoManager;
     private final NotesMigration migration;
     private final AllUsersNameProvider allUsersProvider;
+    private final Provider<InternalChangeQuery> queryProvider;
 
     @VisibleForTesting
     @Inject
     public Factory(GitRepositoryManager repoManager,
         NotesMigration migration,
-        AllUsersNameProvider allUsersProvider) {
+        AllUsersNameProvider allUsersProvider,
+        Provider<InternalChangeQuery> queryProvider) {
       this.repoManager = repoManager;
       this.migration = migration;
       this.allUsersProvider = allUsersProvider;
+      this.queryProvider = queryProvider;
     }
 
-    public ChangeNotes create(@SuppressWarnings("unused") ReviewDb db,
-        Change change) {
-      return new ChangeNotes(repoManager, migration, allUsersProvider, change);
+    public ChangeNotes createChecked(ReviewDb db, Change c)
+        throws OrmException, NoSuchChangeException {
+      ChangeNotes notes = create(db, c.getProject(), c.getId());
+      if (notes.getChange() == null) {
+        throw new NoSuchChangeException(c.getId());
+      }
+      return notes;
     }
 
-    public ChangeNotes createForNew(Change change) {
-      return new ChangeNotes(repoManager, migration, allUsersProvider, change);
+    public ChangeNotes createChecked(ReviewDb db, Project.NameKey project,
+        Change.Id changeId) throws OrmException, NoSuchChangeException {
+      ChangeNotes notes = create(db, project, changeId);
+      if (notes.getChange() == null) {
+        throw new NoSuchChangeException(changeId);
+      }
+      return notes;
+    }
+
+    public ChangeNotes createChecked(Change.Id changeId)
+        throws OrmException, NoSuchChangeException {
+      InternalChangeQuery query = queryProvider.get().noFields();
+      List<ChangeData> changes = query.byLegacyChangeId(changeId);
+      if (changes.isEmpty()) {
+        throw new NoSuchChangeException(changeId);
+      }
+      if (changes.size() != 1) {
+        log.error(
+            String.format("Multiple changes found for %d", changeId.get()));
+        throw new NoSuchChangeException(changeId);
+      }
+      return changes.get(0).notes();
+    }
+
+    public ChangeNotes create(ReviewDb db, Project.NameKey project,
+        Change.Id changeId) throws OrmException {
+      Change change = db.changes().get(changeId);
+      // TODO: Throw NoSuchChangeException when the change is not found in the
+      // database
+      return new ChangeNotes(repoManager, migration, allUsersProvider, project,
+          change).load();
+    }
+
+    public ChangeNotes createFromIndexedChange(Change change) {
+      return new ChangeNotes(repoManager, migration, allUsersProvider,
+          change.getProject(), change);
+    }
+
+    public ChangeNotes createForNew(Change change) throws OrmException {
+      return new ChangeNotes(repoManager, migration, allUsersProvider,
+          change.getProject(), change).load();
+    }
+
+    // TODO(dborowitz): Remove when deleting index schemas <27.
+    public ChangeNotes createFromIdOnlyWhenNotedbDisabled(
+        ReviewDb db, Change.Id changeId) throws OrmException {
+    checkState(!migration.readChanges(), "do not call"
+        + " createFromIdOnlyWhenNotedbDisabled when notedb is enabled");
+      Change change = db.changes().get(changeId);
+      return new ChangeNotes(repoManager, migration, allUsersProvider,
+          change.getProject(), change).load();
     }
   }
 
+  private final Project.NameKey project;
   private final Change change;
   private ImmutableSortedMap<PatchSet.Id, PatchSet> patchSets;
   private ImmutableListMultimap<PatchSet.Id, PatchSetApproval> approvals;
@@ -147,10 +214,12 @@ public class ChangeNotes extends AbstractChangeNotes<ChangeNotes> {
 
   @VisibleForTesting
   public ChangeNotes(GitRepositoryManager repoManager, NotesMigration migration,
-      AllUsersNameProvider allUsersProvider, Change change) {
-    super(repoManager, migration, change.getId());
+      AllUsersNameProvider allUsersProvider, Project.NameKey project,
+      Change change) {
+    super(repoManager, migration, change != null ? change.getId() : null);
     this.allUsers = allUsersProvider.get();
-    this.change = new Change(change);
+    this.project = project;
+    this.change = change != null ? new Change(change) : null;
   }
 
   public Change getChange() {
@@ -283,7 +352,7 @@ public class ChangeNotes extends AbstractChangeNotes<ChangeNotes> {
       return;
     }
     try (RevWalk walk = new RevWalk(reader);
-        ChangeNotesParser parser = new ChangeNotesParser(change.getProject(),
+        ChangeNotesParser parser = new ChangeNotesParser(project,
             change.getId(), rev, walk, repoManager)) {
       parser.parseAll();
 
@@ -297,7 +366,7 @@ public class ChangeNotes extends AbstractChangeNotes<ChangeNotes> {
       noteMap = parser.noteMap;
       revisionNotes = parser.revisionNotes;
       change.setKey(new Change.Key(parser.changeId));
-      change.setDest(new Branch.NameKey(getProjectName(), parser.branch));
+      change.setDest(new Branch.NameKey(project, parser.branch));
       change.setTopic(Strings.emptyToNull(parser.topic));
       change.setCreatedOn(parser.createdOn);
       change.setLastUpdatedOn(parser.lastUpdatedOn);
@@ -352,6 +421,6 @@ public class ChangeNotes extends AbstractChangeNotes<ChangeNotes> {
 
   @Override
   public Project.NameKey getProjectName() {
-    return getChange().getProject();
+    return project;
   }
 }

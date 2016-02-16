@@ -309,8 +309,9 @@ public class ChangeHookRunner implements ChangeHooks, EventDispatcher,
               .build());
     }
 
-    private ChangeNotes newNotes(ReviewDb db, Change change) {
-      return notesFactory.create(db, change);
+    private ChangeNotes newNotes(ReviewDb db, Change change)
+        throws OrmException {
+      return notesFactory.create(db, change.getProject(), change.getId());
     }
 
     private static Optional<Path> hook(Config config, Path path, String name) {
@@ -984,7 +985,7 @@ public class ChangeHookRunner implements ChangeHooks, EventDispatcher,
         return false;
       }
       ProjectControl pc = pe.controlFor(user);
-      return pc.controlFor(change).isVisible(db);
+      return pc.controlFor(db, change).isVisible(db);
     }
 
     private boolean isVisibleTo(Branch.NameKey branchName, CurrentUser user) {

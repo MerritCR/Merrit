@@ -22,9 +22,12 @@ limitations under the License.
 <link rel="import" href="gr-change-actions.html">
 <link rel="import" href="gr-change-star.html">
 <link rel="import" href="gr-date-formatter.html">
+<link rel="import" href="gr-download-dialog.html">
 <link rel="import" href="gr-file-list.html">
 <link rel="import" href="gr-linked-text.html">
 <link rel="import" href="gr-messages-list.html">
+<link rel="import" href="gr-overlay.html">
+<link rel="import" href="gr-related-changes-list.html">
 <link rel="import" href="gr-reply-dropdown.html">
 <link rel="import" href="gr-reviewer-list.html">
 
@@ -42,15 +45,18 @@ limitations under the License.
       }
       .headerContainer {
         height: 4.1em;
+        margin-bottom: .5em;
       }
       .header {
         align-items: center;
         background-color: var(--view-background-color);
+        border-bottom: 1px solid #ddd;
         display: flex;
         padding: 1em var(--default-horizontal-margin);
-        z-index: 1000;
+        z-index: 99;  /* Less than gr-overlay's backdrop */
       }
       .header.pinned {
+        border-bottom-color: transparent;
         box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
         position: fixed;
         top: 0;
@@ -69,6 +75,7 @@ limitations under the License.
         margin-right: .25em;
         vertical-align: -.425em;
       }
+      .download,
       .patchSelectLabel {
         margin-left: var(--default-horizontal-margin);
       }
@@ -89,22 +96,26 @@ limitations under the License.
       /* Strong specificity here is needed due to
          https://github.com/Polymer/polymer/issues/2531 */
       .container section.changeInfo {
+        border-bottom: 1px solid #ddd;
+        display: flex;
         margin-top: 0;
         padding-top: 0;
+      }
+      .changeInfo-column:not(:last-of-type) {
+        margin-right: 2em;
       }
       table {
         border-collapse: collapse;
       }
       td {
-        padding: 2px 5px;
+        padding: 2px 5px 2px 0;
         vertical-align: top;
       }
       gr-reviewer-list {
         min-width: 25em;
       }
-      .changeInfo-label {
+      .changeMetadata-label {
         font-weight: bold;
-        text-align: right;
       }
       .labelValue:not(:first-of-type) {
         margin-top: .25em;
@@ -124,14 +135,38 @@ limitations under the License.
       gr-change-actions {
         margin-top: 1em;
       }
-      .summary {
-        border-top: 1px solid #ddd;
-        border-bottom: 1px solid #ddd;
+      .commitMessage {
         font-family: var(--monospace-font-family);
-        overflow-x: auto;
+        max-width: 72ch;
+      }
+      .commitMessage h4 {
+        font-family: var(--font-family);
+        font-weight: bold;
+        margin-bottom: .25em;
       }
       gr-file-list {
-        padding: 0 var(--default-horizontal-margin) 10px;
+        margin-bottom: 1em;
+        padding: 0 var(--default-horizontal-margin);
+      }
+      @media screen and (max-width: 80em) {
+        .changeInfo {
+          flex-wrap: wrap;
+        }
+        .changeInfo-column {
+          margin-right: 0;
+        }
+        .changeInfo-column:not(:first-of-type) {
+          margin-top: .5em;
+        }
+      }
+      @media screen and (max-width: 60em) {
+        .changeInfo {
+          flex-direction: column;
+          flex-wrap: nowrap;
+        }
+        .commitMessage {
+          max-width: none;
+        }
       }
     </style>
     <gr-ajax id="detailXHR"
@@ -156,10 +191,18 @@ limitations under the License.
         <div class="header">
           <span class="header-title">
             <gr-change-star change="{{_change}}" hidden$="[[!_loggedIn]]"></gr-change-star>
-            <a href$="[[_computeChangePath(_change._number)]]">[[_change._number]]</a><span>:</span>
+            <a href$="[[_computeChangePermalink(_change._number)]]">[[_change._number]]</a><span>:</span>
             <span>[[_change.subject]]</span>
             <span class="changeStatus">[[_computeChangeStatus(_change.status)]]</span>
           </span>
+          <gr-reply-dropdown id="replyDropdown"
+              change-num="[[_changeNum]]"
+              patch-num="[[_patchNum]]"
+              labels="[[_change.labels]]"
+              permitted-labels="[[_change.permitted_labels]]"
+              on-send="_handleReplySent"
+              hidden$="[[!_loggedIn]]">Reply</gr-reply-dropdown>
+          <a class="download" href="#" on-tap="_handleDownloadTap">Download</a>
           <label class="patchSelectLabel" for="patchSetSelect">Patch set</label>
           <select id="patchSetSelect" on-change="_handlePatchChange">
             <template is="dom-repeat" items="{{_allPatchSets}}" as="patchNumber">
@@ -170,86 +213,88 @@ limitations under the License.
               </option>
             </template>
           </select>
-          <gr-reply-dropdown id="replyDropdown"
-              change-num="[[_changeNum]]"
-              patch-num="[[_patchNum]]"
-              labels="[[_change.labels]]"
-              permitted-labels="[[_change.permitted_labels]]"
-              on-send="_handleReplySent"
-              hidden$="[[!_loggedIn]]">Reply</gr-reply-dropdown>
         </div>
       </div>
       <section class="changeInfo">
-        <table>
-          <tr>
-            <td class="changeInfo-label">Owner</td>
-            <td>
-              <gr-account-link account="[[_change.owner]]"
-                  show-email></gr-account-link>
-            </td>
-          </tr>
-          <tr>
-            <td class="changeInfo-label">Reviewers</td>
-            <td>
-              <gr-reviewer-list
-                  change="[[_change]]"
-                  mutable="[[_loggedIn]]"
-                  suggest-from="[[serverConfig.suggest.from]]"></gr-reviewer-list>
-            </td>
-          </tr>
-          <tr>
-            <td class="changeInfo-label">Project</td>
-            <td>[[_change.project]]</td>
-          </tr>
-          <tr>
-            <td class="changeInfo-label">Branch</td>
-            <td>[[_change.branch]]</td>
-          </tr>
-          <tr>
-            <td class="changeInfo-label">Topic</td>
-            <td>[[_change.topic]]</td>
-          </tr>
-          <tr>
-            <td class="changeInfo-label">Strategy</td>
-            <td></td>
-          </tr>
-          <tr>
-            <td class="changeInfo-label">Updated</td>
-            <td>
-              <gr-date-formatter
-                  date-str="[[_change.updated]]"></gr-date-formatter>
-            </td>
-          </tr>
-          <template is="dom-repeat"
-              items="[[_computeLabelNames(_change.labels)]]" as="labelName">
+        <div class="changeInfo-column changeMetadata">
+          <table>
             <tr>
-              <td class="changeInfo-label">[[labelName]]</td>
+              <td class="changeMetadata-label">Owner</td>
               <td>
-                <template is="dom-repeat"
-                    items="[[_computeLabelValues(labelName, _change.labels)]]"
-                    as="label">
-                  <div class="labelValue">
-                    <span class$="[[label.className]]">
-                      <span>[[label.value]]</span>
-                      <gr-account-link account="[[label.account]]"
-                          show-email></gr-account-link>
-                    </span>
-                  </div>
-                </template>
+                <gr-account-link account="[[_change.owner]]"
+                    show-email></gr-account-link>
               </td>
             </tr>
-          </template>
-        </table>
-        <gr-change-actions id="actions"
-            actions="[[_change.actions]]"
-            change-num="[[_changeNum]]"
-            patch-num="[[_patchNum]]"
-            on-reload-change="_reload"></gr-change-actions>
-      </section>
-      <section class="summary">
-        <gr-linked-text pre
-            content="[[_commitInfo.message]]"
-            config="[[_projectConfig.commentlinks]]"></gr-linked-text>
+            <tr>
+              <td class="changeMetadata-label">Reviewers</td>
+              <td>
+                <gr-reviewer-list
+                    change="[[_change]]"
+                    mutable="[[_loggedIn]]"
+                    suggest-from="[[serverConfig.suggest.from]]"></gr-reviewer-list>
+              </td>
+            </tr>
+            <tr>
+              <td class="changeMetadata-label">Project</td>
+              <td>[[_change.project]]</td>
+            </tr>
+            <tr>
+              <td class="changeMetadata-label">Branch</td>
+              <td>[[_change.branch]]</td>
+            </tr>
+            <tr>
+              <td class="changeMetadata-label">Topic</td>
+              <td>[[_change.topic]]</td>
+            </tr>
+            <tr>
+              <td class="changeMetadata-label">Strategy</td>
+              <td></td>
+            </tr>
+            <tr>
+              <td class="changeMetadata-label">Updated</td>
+              <td>
+                <gr-date-formatter
+                    date-str="[[_change.updated]]"></gr-date-formatter>
+              </td>
+            </tr>
+            <template is="dom-repeat"
+                items="[[_computeLabelNames(_change.labels)]]" as="labelName">
+              <tr>
+                <td class="changeMetadata-label">[[labelName]]</td>
+                <td>
+                  <template is="dom-repeat"
+                      items="[[_computeLabelValues(labelName, _change.labels)]]"
+                      as="label">
+                    <div class="labelValue">
+                      <span class$="[[label.className]]">
+                        <span>[[label.value]]</span>
+                        <gr-account-link account="[[label.account]]"
+                            show-email></gr-account-link>
+                      </span>
+                    </div>
+                  </template>
+                </td>
+              </tr>
+            </template>
+          </table>
+          <gr-change-actions id="actions"
+              actions="[[_change.actions]]"
+              change-num="[[_changeNum]]"
+              patch-num="[[_patchNum]]"
+              on-reload-change="_reload"></gr-change-actions>
+        </div>
+        <div class="changeInfo-column commitMessage">
+          <h4>Commit message</h4>
+          <gr-linked-text pre
+              content="[[_commitInfo.message]]"
+              config="[[_projectConfig.commentlinks]]"></gr-linked-text>
+        </div>
+        <div class="changeInfo-column">
+          <gr-related-changes-list id="relatedChanges"
+              change="[[_change]]"
+              server-config="[[serverConfig]]"
+              patch-num="[[_patchNum]]"></gr-related-changes-list>
+        </div>
       </section>
       <gr-file-list id="fileList"
           change-num="[[_changeNum]]"
@@ -264,6 +309,13 @@ limitations under the License.
           show-reply-buttons="[[_loggedIn]]"
           on-reply="_handleMessageReply"></gr-messages-list>
     </div>
+    <gr-overlay id="downloadOverlay" with-backdrop>
+      <gr-download-dialog
+          change="[[_change]]"
+          patch-num="[[_patchNum]]"
+          config="[[serverConfig.download]]"
+          on-close="_handleDownloadDialogClose"></gr-download-dialog>
+    </gr-overlay>
   </template>
   <script>
   (function() {
@@ -369,12 +421,21 @@ limitations under the License.
       _handlePatchChange: function(e) {
         var patchNum = e.target.value;
         var currentPatchNum =
-            this._change.revisions[this._change.current_revision]._number
+            this._change.revisions[this._change.current_revision]._number;
         if (patchNum == currentPatchNum) {
           page.show(this._computeChangePath(this._changeNum));
           return;
         }
         page.show(this._computeChangePath(this._changeNum) + '/' + patchNum);
+      },
+
+      _handleDownloadTap: function(e) {
+        e.preventDefault();
+        this.$.downloadOverlay.open();
+      },
+
+      _handleDownloadDialogClose: function(e) {
+        this.$.downloadOverlay.close();
       },
 
       _handleMessageReply: function(e) {
@@ -439,6 +500,10 @@ limitations under the License.
         return '/c/' + changeNum;
       },
 
+      _computeChangePermalink: function(changeNum) {
+        return '/' + changeNum;
+      },
+
       _computeChangeStatus: function(status) {
         if (status == this.ChangeStatus.NEW) {
           return '';
@@ -465,9 +530,10 @@ limitations under the License.
       _computeDetailQueryParams: function() {
         var options = this.listChangesOptionsToHex(
             this.ListChangesOption.ALL_REVISIONS,
-            this.ListChangesOption.CHANGE_ACTIONS
+            this.ListChangesOption.CHANGE_ACTIONS,
+            this.ListChangesOption.DOWNLOAD_COMMANDS
         );
-        return { O: options };
+        return {O: options};
       },
 
       _computeLatestPatchNum: function(change) {
@@ -483,7 +549,7 @@ limitations under the License.
       },
 
       _computePatchIndexIsSelected: function(index, patchNum) {
-         return this._allPatchSets[index] == patchNum;
+        return this._allPatchSets[index] == patchNum;
       },
 
       _computeLabelNames: function(labels) {
@@ -500,7 +566,7 @@ limitations under the License.
             var labelClassName;
             var labelValPrefix = '';
             if (label.value > 0) {
-              labelValPrefix = '+'
+              labelValPrefix = '+';
               labelClassName = 'approved';
             } else if (label.value < 0) {
               labelClassName = 'notApproved';
@@ -518,7 +584,7 @@ limitations under the License.
       _handleKey: function(e) {
         if (this.shouldSupressKeyboardShortcut(e)) { return; }
 
-        switch(e.keyCode) {
+        switch (e.keyCode) {
           case 65:  // 'a'
             e.preventDefault();
             this.$.replyDropdown.open();
@@ -540,14 +606,20 @@ limitations under the License.
             this.$.fileList.reload(),
           ]);
         }.bind(this);
+        var reloadDetailDependentResources = function() {
+          return this.$.relatedChanges.reload();
+        }.bind(this);
 
         this._resetHeaderEl();
 
         if (this._patchNum) {
-          return reloadPatchNumDependentResources();
+          return reloadPatchNumDependentResources().then(function() {
+            return detailCompletes;
+          }).then(reloadDetailDependentResources);
         } else {
           // The patch number is reliant on the change detail request.
-          return detailCompletes.then(reloadPatchNumDependentResources);
+          return detailCompletes.then(reloadPatchNumDependentResources).then(
+              reloadDetailDependentResources);
         }
       },
 

@@ -82,7 +82,7 @@ port 29418, using the same hostname as the web server:
 
 ====
 ..................................................................
-  $ ssh -p 29418 sshusername@hostname
+  $ ssh -T -p 29418 sshusername@hostname
 
     ****    Welcome to Gerrit Code Review    ****
 
@@ -188,6 +188,10 @@ option in the reference:
 
 The `l='label[score]'` option may be specified more than once to
 apply multiple review labels.
+
+====
+  git push ssh://john.doe@git.example.com:29418/kernel/common HEAD:refs/for/experimental%l=Code-Review+1,l=Verified+1
+====
 
 The value is optional.  If not specified, it defaults to +1 (if
 the label range allows it).

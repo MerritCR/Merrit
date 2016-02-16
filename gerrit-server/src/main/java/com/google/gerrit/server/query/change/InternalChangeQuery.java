@@ -23,6 +23,7 @@ import static com.google.gerrit.server.query.change.ChangeStatusPredicate.open;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Strings;
+import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Sets;
 import com.google.gerrit.common.Nullable;
 import com.google.gerrit.reviewdb.client.Branch;
@@ -34,6 +35,8 @@ import com.google.gerrit.server.index.ChangeIndex;
 import com.google.gerrit.server.index.IndexCollection;
 import com.google.gerrit.server.index.IndexConfig;
 import com.google.gerrit.server.index.Schema;
+import com.google.gerrit.server.notedb.ChangeNotes;
+import com.google.gerrit.server.notedb.NotesMigration;
 import com.google.gerrit.server.query.Predicate;
 import com.google.gerrit.server.query.QueryParseException;
 import com.google.gwtorm.server.OrmException;
@@ -83,16 +86,22 @@ public class InternalChangeQuery {
   private final QueryProcessor qp;
   private final IndexCollection indexes;
   private final ChangeData.Factory changeDataFactory;
+  private final NotesMigration notesMigration;
+  private final ChangeNotes.Factory notesFactory;
 
   @Inject
   InternalChangeQuery(IndexConfig indexConfig,
       QueryProcessor queryProcessor,
       IndexCollection indexes,
-      ChangeData.Factory changeDataFactory) {
+      ChangeData.Factory changeDataFactory,
+      NotesMigration notesMigration,
+      ChangeNotes.Factory notesFactory) {
     this.indexConfig = indexConfig;
     qp = queryProcessor.enforceVisibility(false);
     this.indexes = indexes;
     this.changeDataFactory = changeDataFactory;
+    this.notesMigration = notesMigration;
+    this.notesFactory = notesFactory;
   }
 
   public InternalChangeQuery setLimit(int n) {
@@ -110,12 +119,30 @@ public class InternalChangeQuery {
     return this;
   }
 
+  public InternalChangeQuery noFields() {
+    qp.setRequestedFields(ImmutableSet.<String> of());
+    return this;
+  }
+
   public List<ChangeData> byKey(Change.Key key) throws OrmException {
     return byKeyPrefix(key.get());
   }
 
   public List<ChangeData> byKeyPrefix(String prefix) throws OrmException {
     return query(new ChangeIdPredicate(prefix));
+  }
+
+  public List<ChangeData> byLegacyChangeId(Change.Id id) throws OrmException {
+    return query(new LegacyChangeIdPredicate(id));
+  }
+
+  public List<ChangeData> byLegacyChangeIds(Collection<Change.Id> ids)
+      throws OrmException {
+    List<Predicate<ChangeData>> preds = new ArrayList<>(ids.size());
+    for (Change.Id id : ids) {
+      preds.add(new LegacyChangeIdPredicate(id));
+    }
+    return query(or(preds));
   }
 
   public List<ChangeData> byBranchKey(Branch.NameKey branch, Change.Key key)
@@ -180,6 +207,18 @@ public class InternalChangeQuery {
     }
 
     List<ChangeData> cds = new ArrayList<>(hashes.size());
+    if (notesMigration.enabled()) {
+      for (Change.Id cid : changeIds) {
+        Change c =
+            notesFactory.create(db, branch.getParentKey(), cid).getChange();
+        if (c != null && c.getDest().equals(branch)
+            && c.getStatus() != Change.Status.MERGED) {
+          cds.add(changeDataFactory.create(db, c));
+        }
+      }
+      return cds;
+    }
+
     for (Change c : db.changes().get(changeIds)) {
       if (c.getDest().equals(branch) && c.getStatus() != Change.Status.MERGED) {
         cds.add(changeDataFactory.create(db, c));

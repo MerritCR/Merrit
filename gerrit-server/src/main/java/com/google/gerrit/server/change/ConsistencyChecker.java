@@ -14,6 +14,7 @@
 
 package com.google.gerrit.server.change;
 
+import static com.google.common.base.Preconditions.checkState;
 import static com.google.gerrit.reviewdb.client.RefNames.REFS_CHANGES;
 import static com.google.gerrit.reviewdb.server.ReviewDbUtil.intKeyOrdering;
 import static com.google.gerrit.server.ChangeUtil.PS_ID_ORDER;
@@ -47,6 +48,7 @@ import com.google.gerrit.server.git.validators.CommitValidators;
 import com.google.gerrit.server.index.ChangeIndexer;
 import com.google.gerrit.server.notedb.ChangeNotes;
 import com.google.gerrit.server.notedb.ChangeUpdate;
+import com.google.gerrit.server.notedb.NotesMigration;
 import com.google.gerrit.server.patch.PatchSetInfoFactory;
 import com.google.gerrit.server.patch.PatchSetInfoNotAvailableException;
 import com.google.gerrit.server.project.ChangeControl;
@@ -112,6 +114,7 @@ public class ConsistencyChecker {
 
   private final Provider<ReviewDb> db;
   private final GitRepositoryManager repoManager;
+  private final NotesMigration notesMigration;
   private final Provider<CurrentUser> user;
   private final Provider<PersonIdent> serverIdent;
   private final ProjectControl.GenericFactory projectControlFactory;
@@ -138,6 +141,7 @@ public class ConsistencyChecker {
   @Inject
   ConsistencyChecker(Provider<ReviewDb> db,
       GitRepositoryManager repoManager,
+      NotesMigration notesMigration,
       Provider<CurrentUser> user,
       @GerritPersonIdent Provider<PersonIdent> serverIdent,
       ProjectControl.GenericFactory projectControlFactory,
@@ -149,6 +153,7 @@ public class ConsistencyChecker {
       ChangeNotes.Factory notesFactory,
       ChangeUpdate.Factory changeUpdateFactory) {
     this.db = db;
+    this.notesMigration = notesMigration;
     this.repoManager = repoManager;
     this.user = user;
     this.serverIdent = serverIdent;
@@ -206,6 +211,8 @@ public class ConsistencyChecker {
   }
 
   private void checkImpl() {
+    checkState(!notesMigration.readChanges(),
+        "ConsistencyChecker for notedb not yet implemented");
     checkOwner();
     checkCurrentPatchSetEntity();
 
@@ -312,7 +319,7 @@ public class ConsistencyChecker {
           objId, String.format("patch set %d", psNum));
       if (psCommit == null) {
         if (fix != null && fix.deletePatchSetIfCommitMissing) {
-          deletePatchSet(lastProblem(), ps.getId());
+          deletePatchSet(lastProblem(), change.getProject(), ps.getId());
         }
         continue;
       } else if (refProblem != null && fix != null) {
@@ -419,11 +426,12 @@ public class ConsistencyChecker {
           continue;
         }
         try {
-          Change c = db.get().changes().get(psId.getParentKey());
-          if (c == null || !c.getDest().equals(change.getDest())) {
+          Change c = notesFactory.createChecked(
+              db.get(), change.getProject(), psId.getParentKey()).getChange();
+          if (!c.getDest().equals(change.getDest())) {
             continue;
           }
-        } catch (OrmException e) {
+        } catch (OrmException | NoSuchChangeException e) {
           warn(e);
           // Include this patch set; should cause an error below, which is good.
         }
@@ -529,7 +537,7 @@ public class ConsistencyChecker {
           });
       ChangeUpdate changeUpdate =
           changeUpdateFactory.create(
-              changeControlFactory.controlFor(change, user.get()));
+              changeControlFactory.controlFor(db.get(), change, user.get()));
       changeUpdate.fixStatus(Change.Status.MERGED);
       changeUpdate.commit();
       indexer.index(db.get(), change);
@@ -577,18 +585,15 @@ public class ConsistencyChecker {
     }
   }
 
-  private void deletePatchSet(ProblemInfo p, PatchSet.Id psId) {
+  private void deletePatchSet(ProblemInfo p, Project.NameKey project,
+      PatchSet.Id psId) {
     ReviewDb db = this.db.get();
     Change.Id cid = psId.getParentKey();
     try {
       db.changes().beginTransaction(cid);
       try {
-        Change c = db.changes().get(cid);
-        if (c == null) {
-          throw new OrmException("Change missing: " + cid);
-        }
-        ChangeNotes notes = notesFactory.create(db, c);
-
+        ChangeNotes notes = notesFactory.createChecked(db, project, cid);
+        Change c = notes.getChange();
         if (psId.equals(c.currentPatchSetId())) {
           List<PatchSet> all = Lists.newArrayList(db.patchSets().byChange(cid));
           if (all.size() == 1 && all.get(0).getId().equals(psId)) {
@@ -628,7 +633,8 @@ public class ConsistencyChecker {
       } finally {
         db.rollback();
       }
-    } catch (PatchSetInfoNotAvailableException | OrmException e) {
+    } catch (PatchSetInfoNotAvailableException | OrmException
+        | NoSuchChangeException e) {
       String msg = "Error deleting patch set";
       log.warn(msg + ' ' + psId, e);
       p.status = Status.FIX_FAILED;

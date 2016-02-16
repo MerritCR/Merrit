@@ -14,10 +14,12 @@
 
 package com.google.gerrit.server.query.change;
 
+import static com.google.common.base.Preconditions.checkState;
 import static com.google.gerrit.server.ApprovalsUtil.sortApprovals;
 
 import com.google.auto.value.AutoValue;
 import com.google.common.base.MoreObjects;
+import com.google.common.base.Optional;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.ListMultimap;
@@ -33,6 +35,7 @@ import com.google.gerrit.reviewdb.client.Patch;
 import com.google.gerrit.reviewdb.client.PatchLineComment;
 import com.google.gerrit.reviewdb.client.PatchSet;
 import com.google.gerrit.reviewdb.client.PatchSetApproval;
+import com.google.gerrit.reviewdb.client.Project;
 import com.google.gerrit.reviewdb.client.RefNames;
 import com.google.gerrit.reviewdb.server.ReviewDb;
 import com.google.gerrit.server.ApprovalsUtil;
@@ -113,6 +116,7 @@ public class ChangeData {
       for (ChangeData cd : changes) {
         cd.change();
       }
+      return;
     }
 
     Map<Change.Id, ChangeData> missing = Maps.newHashMap();
@@ -269,9 +273,12 @@ public class ChangeData {
   }
 
   public interface Factory {
-    ChangeData create(ReviewDb db, Change.Id id);
+    ChangeData create(ReviewDb db, Project.NameKey project, Change.Id id);
     ChangeData create(ReviewDb db, Change c);
     ChangeData create(ReviewDb db, ChangeControl c);
+
+    // TODO(dborowitz): Remove when deleting index schemas <27.
+    ChangeData createOnlyWhenNotedbDisabled(ReviewDb db, Change.Id id);
   }
 
   /**
@@ -283,9 +290,10 @@ public class ChangeData {
    * @param id change ID
    * @return instance for testing.
    */
-  public static ChangeData createForTest(Change.Id id, int currentPatchSetId) {
+  public static ChangeData createForTest(Project.NameKey project, Change.Id id,
+      int currentPatchSetId) {
     ChangeData cd = new ChangeData(null, null, null, null, null, null, null,
-        null, null, null, null, null, null, null, id);
+        null, null, null, null, null, null, null, project, id);
     cd.currentPatchSet = new PatchSet(new PatchSet.Id(id, currentPatchSetId));
     return cd;
   }
@@ -306,6 +314,7 @@ public class ChangeData {
   private final MergeabilityCache mergeabilityCache;
   private final Change.Id legacyId;
   private ChangeDataSource returnedBySource;
+  private Project.NameKey project;
   private Change change;
   private ChangeNotes notes;
   private String commitMessage;
@@ -345,6 +354,7 @@ public class ChangeData {
       NotesMigration notesMigration,
       MergeabilityCache mergeabilityCache,
       @Assisted ReviewDb db,
+      @Assisted Project.NameKey project,
       @Assisted Change.Id id) {
     this.db = db;
     this.repoManager = repoManager;
@@ -360,7 +370,8 @@ public class ChangeData {
     this.patchListCache = patchListCache;
     this.notesMigration = notesMigration;
     this.mergeabilityCache = mergeabilityCache;
-    legacyId = id;
+    this.project = project;
+    this.legacyId = id;
   }
 
   @AssistedInject
@@ -396,6 +407,7 @@ public class ChangeData {
     this.mergeabilityCache = mergeabilityCache;
     legacyId = c.getId();
     change = c;
+    project = c.getProject();
   }
 
   @AssistedInject
@@ -433,6 +445,44 @@ public class ChangeData {
     change = c.getChange();
     changeControl = c;
     notes = c.getNotes();
+    project = notes.getProjectName();
+  }
+
+  @AssistedInject
+  private ChangeData(
+      GitRepositoryManager repoManager,
+      ChangeControl.GenericFactory changeControlFactory,
+      IdentifiedUser.GenericFactory userFactory,
+      ProjectCache projectCache,
+      MergeUtil.Factory mergeUtilFactory,
+      ChangeNotes.Factory notesFactory,
+      ApprovalsUtil approvalsUtil,
+      ChangeMessagesUtil cmUtil,
+      PatchLineCommentsUtil plcUtil,
+      PatchSetUtil psUtil,
+      PatchListCache patchListCache,
+      NotesMigration notesMigration,
+      MergeabilityCache mergeabilityCache,
+      @Assisted ReviewDb db,
+      @Assisted Change.Id id) {
+    checkState(!notesMigration.readChanges(),
+        "do not call createOnlyWhenNotedbDisabled when notedb is enabled");
+    this.db = db;
+    this.repoManager = repoManager;
+    this.changeControlFactory = changeControlFactory;
+    this.userFactory = userFactory;
+    this.projectCache = projectCache;
+    this.mergeUtilFactory = mergeUtilFactory;
+    this.notesFactory = notesFactory;
+    this.approvalsUtil = approvalsUtil;
+    this.cmUtil = cmUtil;
+    this.plcUtil = plcUtil;
+    this.psUtil = psUtil;
+    this.patchListCache = patchListCache;
+    this.notesMigration = notesMigration;
+    this.mergeabilityCache = mergeabilityCache;
+    this.legacyId = id;
+    this.project = null;
   }
 
   public ReviewDb db() {
@@ -536,6 +586,15 @@ public class ChangeData {
     return legacyId;
   }
 
+  public Project.NameKey project() throws OrmException {
+    if (project == null) {
+      checkState(!notesMigration.readChanges(), "should not have created "
+          + " ChangeData without a project when notedb is enabled");
+      project = change().getProject();
+    }
+    return project;
+  }
+
   boolean fastIsVisibleTo(CurrentUser user) {
     return visibleTo == user;
   }
@@ -548,8 +607,8 @@ public class ChangeData {
     if (changeControl == null) {
       Change c = change();
       try {
-        changeControl =
-            changeControlFactory.controlFor(c, userFactory.create(c.getOwner()));
+        changeControl = changeControlFactory.controlFor(
+            db, c, userFactory.create(c.getOwner()));
       } catch (NoSuchChangeException e) {
         throw new OrmException(e);
       }
@@ -564,9 +623,10 @@ public class ChangeData {
     }
     try {
       if (change != null) {
-        changeControl = changeControlFactory.controlFor(change, user);
+        changeControl = changeControlFactory.controlFor(db, change, user);
       } else {
-        changeControl = changeControlFactory.controlFor(legacyId, user);
+        changeControl =
+            changeControlFactory.controlFor(db, project(), legacyId, user);
       }
     } catch (NoSuchChangeException e) {
       throw new OrmException(e);
@@ -591,13 +651,21 @@ public class ChangeData {
   }
 
   public Change reloadChange() throws OrmException {
-    change = db.changes().get(legacyId);
+    if (project == null) {
+      notes = notesFactory.createFromIdOnlyWhenNotedbDisabled(db, legacyId);
+    } else {
+      notes = notesFactory.create(db, project, legacyId);
+    }
+    change = notes.getChange();
+    if (change == null) {
+      throw new OrmException("Unable to load change " + legacyId);
+    }
     return change;
   }
 
   public ChangeNotes notes() throws OrmException {
     if (notes == null) {
-      notes = notesFactory.create(db, change());
+      notes = notesFactory.create(db, project(), legacyId);
     }
     return notes;
   }
@@ -680,7 +748,7 @@ public class ChangeData {
       return false;
     }
     String sha1 = ps.getRevision().get();
-    try (Repository repo = repoManager.openRepository(change().getProject());
+    try (Repository repo = repoManager.openRepository(project());
         RevWalk walk = new RevWalk(repo)) {
       RevCommit c = walk.parseCommit(ObjectId.fromString(sha1));
       commitMessage = c.getFullMessage();
@@ -736,6 +804,20 @@ public class ChangeData {
     return allApprovals;
   }
 
+  /**
+   * @return The submit ('SUBM') approval label
+   * @throws OrmException an error occurred reading the database.
+   */
+  public Optional<PatchSetApproval> getSubmitApproval()
+    throws OrmException {
+    for (PatchSetApproval psa : currentApprovals()) {
+      if (psa.isSubmit()) {
+        return Optional.fromNullable(psa);
+      }
+    }
+    return Optional.absent();
+  }
+
   public SetMultimap<ReviewerStateInternal, Account.Id> reviewers()
       throws OrmException {
     return approvalsUtil.getReviewers(notes(), approvals().values());
@@ -789,7 +871,7 @@ public class ChangeData {
         if (ps == null || !changeControl().isPatchVisible(ps, db)) {
           return null;
         }
-        try (Repository repo = repoManager.openRepository(c.getProject())) {
+        try (Repository repo = repoManager.openRepository(project())) {
           Ref ref = repo.getRefDatabase().exactRef(c.getDest().get());
           SubmitTypeRecord str = submitTypeRecord();
           if (!str.isOk()) {
@@ -798,7 +880,7 @@ public class ChangeData {
             return false;
           }
           String mergeStrategy = mergeUtilFactory
-              .create(projectCache.get(c.getProject()))
+              .create(projectCache.get(project()))
               .mergeStrategyName();
           mergeable = mergeabilityCache.get(
               ObjectId.fromString(ps.getRevision().get()),
@@ -819,7 +901,7 @@ public class ChangeData {
       }
       editsByUser = new HashSet<>();
       Change.Id id = change.getId();
-      try (Repository repo = repoManager.openRepository(change.getProject())) {
+      try (Repository repo = repoManager.openRepository(project())) {
         for (String ref
             : repo.getRefDatabase().getRefs(RefNames.REFS_USERS).keySet()) {
           if (Change.Id.fromEditRefPart(ref).equals(id)) {

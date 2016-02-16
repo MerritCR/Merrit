@@ -14,7 +14,8 @@
 
 package com.google.gerrit.server.git.strategy;
 
-import static com.google.common.base.Preconditions.checkState;
+import static com.google.common.base.Preconditions.checkNotNull;
+import static com.google.gerrit.server.git.strategy.CommitMergeStatus.SKIPPED_IDENTICAL_TREE;
 
 import com.google.common.collect.ImmutableList;
 import com.google.gerrit.extensions.restapi.MergeConflictException;
@@ -126,7 +127,7 @@ public class CherryPick extends SubmitStrategy {
         toMerge.setStatusCode(CommitMergeStatus.PATH_CONFLICT);
         return;
       } catch (MergeIdenticalTreeException mie) {
-        toMerge.setStatusCode(CommitMergeStatus.ALREADY_MERGED);
+        toMerge.setStatusCode(SKIPPED_IDENTICAL_TREE);
         return;
       }
       // Initial copy doesn't have new patch set ID since change hasn't been
@@ -146,7 +147,11 @@ public class CherryPick extends SubmitStrategy {
     @Override
     public PatchSet updateChangeImpl(ChangeContext ctx) throws OrmException,
          NoSuchChangeException, IOException {
-      checkState(newCommit != null,
+      if (newCommit == null
+          && toMerge.getStatusCode() == SKIPPED_IDENTICAL_TREE) {
+        return null;
+      }
+      checkNotNull(newCommit,
           "no new commit produced by CherryPick of %s, expected to fail fast",
           toMerge.change().getId());
       PatchSet prevPs = args.psUtil.current(ctx.getDb(), ctx.getNotes());

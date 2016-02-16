@@ -48,6 +48,7 @@ import com.google.gerrit.extensions.client.SubmitType;
 import com.google.gerrit.extensions.common.AccountInfo;
 import com.google.gerrit.extensions.common.ApprovalInfo;
 import com.google.gerrit.extensions.common.ChangeInfo;
+import com.google.gerrit.extensions.common.ChangeInput;
 import com.google.gerrit.extensions.common.ChangeMessageInfo;
 import com.google.gerrit.extensions.common.GitPerson;
 import com.google.gerrit.extensions.common.LabelInfo;
@@ -251,6 +252,27 @@ public class ChangeIT extends AbstractDaemonTest {
   }
 
   @Test
+  public void publish() throws Exception {
+    PushOneCommit.Result r = createChange("refs/drafts/master");
+    assertThat(info(r.getChangeId()).status).isEqualTo(ChangeStatus.DRAFT);
+    gApi.changes()
+      .id(r.getChangeId())
+      .publish();
+    assertThat(info(r.getChangeId()).status).isEqualTo(ChangeStatus.NEW);
+  }
+
+  @Test
+  public void delete() throws Exception {
+    PushOneCommit.Result r = createChange("refs/drafts/master");
+    assertThat(query(r.getChangeId())).hasSize(1);
+    assertThat(info(r.getChangeId()).status).isEqualTo(ChangeStatus.DRAFT);
+    gApi.changes()
+      .id(r.getChangeId())
+      .delete();
+    assertThat(query(r.getChangeId())).isEmpty();
+  }
+
+  @Test
   public void voteOnBehalfOf() throws Exception {
     ProjectConfig cfg = projectCache.checkedGet(project).getConfig();
     LabelType codeReviewType = Util.codeReview();
@@ -391,6 +413,7 @@ public class ChangeIT extends AbstractDaemonTest {
     Collection<AccountInfo> reviewers = isNoteDbTestEnabled()
         ? c.reviewers.get(REVIEWER)
         : c.reviewers.get(CC);
+    assertThat(reviewers).isNotNull();
     assertThat(reviewers).hasSize(1);
     assertThat(reviewers.iterator().next()._accountId)
         .isEqualTo(user.getId().get());
@@ -563,7 +586,7 @@ public class ChangeIT extends AbstractDaemonTest {
 
   @Test
   public void createEmptyChange() throws Exception {
-    ChangeInfo in = new ChangeInfo();
+    ChangeInput in = new ChangeInput();
     in.branch = Constants.MASTER;
     in.subject = "Create a change from the API";
     in.project = project.get();
@@ -722,6 +745,25 @@ public class ChangeIT extends AbstractDaemonTest {
     assertThat(gApi.changes()
         .id(r.getChangeId())
         .topic()).isEqualTo("");
+  }
+
+  @Test
+  public void submitted() throws Exception {
+    PushOneCommit.Result r = createChange();
+    gApi.changes()
+        .id(r.getChangeId())
+        .revision(r.getCommit().name())
+        .review(ReviewInput.approve());
+    assertThat(gApi.changes()
+        .id(r.getChangeId())
+        .info().submitted).isNull();
+    gApi.changes()
+        .id(r.getChangeId())
+        .revision(r.getCommit().name())
+        .submit();
+    assertThat(gApi.changes()
+        .id(r.getChangeId())
+        .info().submitted).isNotNull();
   }
 
   @Test
@@ -938,6 +980,39 @@ public class ChangeIT extends AbstractDaemonTest {
           .isEqualTo(new PersonIdent(serverIdent.get(), c.created));
       assertThat(commitChangeCreation.getParentCount()).isEqualTo(0);
     }
+  }
+
+  @Test
+  public void createEmptyChangeOnNonExistingBranch() throws Exception {
+    ChangeInput in = new ChangeInput();
+    in.branch = "foo";
+    in.subject = "Create a change on new branch from the API";
+    in.project = project.get();
+    in.newBranch = true;
+    ChangeInfo info = gApi
+        .changes()
+        .create(in)
+        .get();
+    assertThat(info.project).isEqualTo(in.project);
+    assertThat(info.branch).isEqualTo(in.branch);
+    assertThat(info.subject).isEqualTo(in.subject);
+    assertThat(Iterables.getOnlyElement(info.messages).message)
+        .isEqualTo("Uploaded patch set 1.");
+  }
+
+  @Test
+  public void createEmptyChangeOnExistingBranchWithNewBranch() throws Exception {
+    ChangeInput in = new ChangeInput();
+    in.branch = Constants.MASTER;
+    in.subject = "Create a change on new branch from the API";
+    in.project = project.get();
+    in.newBranch = true;
+
+    exception.expect(ResourceConflictException.class);
+    ChangeInfo info = gApi
+        .changes()
+        .create(in)
+        .get();
   }
 
   private static Iterable<Account.Id> getReviewers(

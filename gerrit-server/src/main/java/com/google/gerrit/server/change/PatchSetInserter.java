@@ -223,7 +223,9 @@ public class PatchSetInserter extends BatchUpdate.Op {
     List<String> newGroups = groups;
     if (newGroups.isEmpty()) {
       PatchSet prevPs = psUtil.current(ctx.getDb(), ctx.getNotes());
-      newGroups = prevPs != null ? prevPs.getGroups() : null;
+      if (prevPs != null) {
+        newGroups = prevPs.getGroups();
+      }
     }
     patchSet = psUtil.insert(ctx.getDb(), ctx.getRevWalk(), ctx.getUpdate(psId),
         psId, commit, draft, newGroups, null);
@@ -259,7 +261,7 @@ public class PatchSetInserter extends BatchUpdate.Op {
     if (sendMail) {
       try {
         ReplacePatchSetSender cm = replacePatchSetFactory.create(
-            change.getId());
+            ctx.getProject(), change.getId());
         cm.setFrom(ctx.getUser().getAccountId());
         cm.setPatchSet(patchSet, patchSetInfo);
         cm.setChangeMessage(changeMessage);

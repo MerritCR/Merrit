@@ -384,7 +384,7 @@ public class PostReview implements RestModifyView<RevisionResource, ReviewInput>
             in.notify,
             notes,
             ps,
-            user.getAccountId(),
+            user,
             message,
             comments).sendAsync();
       }
@@ -600,6 +600,8 @@ public class PostReview implements RestModifyView<RevisionResource, ReviewInput>
           ups.add(c);
         }
       }
+      ctx.getUpdate(ctx.getChange().currentPatchSetId())
+          .putReviewer(user.getAccountId(), REVIEWER);
     }
 
     private Map<String, PatchSetApproval> scanLabels(ChangeContext ctx,

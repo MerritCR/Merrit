@@ -188,6 +188,7 @@ public class BatchUpdate implements AutoCloseable {
 
     @Override
     public ReviewDb getDb() {
+      checkNotNull(dbWrapper);
       return dbWrapper;
     }
 
@@ -202,15 +203,20 @@ public class BatchUpdate implements AutoCloseable {
     }
 
     public ChangeNotes getNotes() {
-      return ctl.getNotes();
+      ChangeNotes n = ctl.getNotes();
+      checkNotNull(n);
+      return n;
     }
 
     public ChangeControl getControl() {
+      checkNotNull(ctl);
       return ctl;
     }
 
     public Change getChange() {
-      return ctl.getChange();
+      Change c = ctl.getChange();
+      checkNotNull(c);
+      return c;
     }
 
     public void saveChange() {
@@ -229,6 +235,12 @@ public class BatchUpdate implements AutoCloseable {
     public void updateRepo(RepoContext ctx) throws Exception {
     }
 
+    /**
+     * Override this method to modify a change.
+     *
+     * @return whether anything was changed that might require a write to
+     * the metadata storage.
+     */
     @SuppressWarnings("unused")
     public boolean updateChange(ChangeContext ctx) throws Exception {
       return false;
@@ -615,7 +627,7 @@ public class BatchUpdate implements AutoCloseable {
               bmdu.commit();
             }
           }
-          indexFutures.add(indexer.indexAsync(id));
+          indexFutures.add(indexer.indexAsync(ctx.getProject(), id));
         }
       }
     } catch (Exception e) {
@@ -635,9 +647,6 @@ public class BatchUpdate implements AutoCloseable {
     ChangeNotes notes = changeNotesFactory.createForNew(c);
     ChangeContext ctx = new ChangeContext(
       changeControlFactory.controlFor(notes, user), new BatchUpdateReviewDb(db));
-    if (notesMigration.readChanges()) {
-      ctx.getNotes().load();
-    }
     return ctx;
   }
 

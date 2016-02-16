@@ -798,7 +798,7 @@ public class ReceiveCommits {
         } catch (RestApiException err) {
           reject(replace.inputCommand, "internal server error");
           log.error(String.format(
-              "Cannot add patch set to %d of %s",
+              "Cannot add patch set to change %d in project %s",
               e.getKey().get(), project.getName()), err);
         }
       } else if (replace.inputCommand.getResult() == NOT_ATTEMPTED) {
@@ -1486,7 +1486,8 @@ public class ReceiveCommits {
 
     final Change changeEnt;
     try {
-      changeEnt = db.changes().get(changeId);
+      changeEnt =
+          notesFactory.create(db, project.getNameKey(), changeId).getChange();
     } catch (OrmException e) {
       log.error("Cannot lookup existing change " + changeId, e);
       reject(cmd, "database error");
@@ -1526,8 +1527,8 @@ public class ReceiveCommits {
     newChanges = Lists.newArrayList();
 
     SetMultimap<ObjectId, Ref> existing = changeRefsById();
-    GroupCollector groupCollector =
-        GroupCollector.create(refsById, db, psUtil, notesFactory);
+    GroupCollector groupCollector = GroupCollector.create(refsById, db, psUtil,
+        notesFactory, project.getNameKey());
 
     rp.getRevWalk().reset();
     rp.getRevWalk().sort(RevSort.TOPO);
@@ -1781,10 +1782,9 @@ public class ReceiveCommits {
       final List<FooterLine> footerLines = commit.getFooterLines();
       final MailRecipients recipients = new MailRecipients();
       Map<String, Short> approvals = new HashMap<>();
-      if (magicBranch != null) {
-        recipients.add(magicBranch.getMailRecipients());
-        approvals = magicBranch.labels;
-      }
+      checkNotNull(magicBranch);
+      recipients.add(magicBranch.getMailRecipients());
+      approvals = magicBranch.labels;
       recipients.add(getRecipientsFromFooters(
           accountResolver, magicBranch.draft, footerLines));
       recipients.remove(me);
@@ -1801,29 +1801,27 @@ public class ReceiveCommits {
             .setRequestScopePropagator(requestScopePropagator)
             .setSendMail(true)
             .setUpdateRef(true));
-        if (magicBranch != null) {
+        bu.addOp(
+            changeId,
+            hashtagsFactory.create(new HashtagsInput(magicBranch.hashtags))
+              .setRunHooks(false));
+        if (!Strings.isNullOrEmpty(magicBranch.topic)) {
           bu.addOp(
               changeId,
-              hashtagsFactory.create(new HashtagsInput(magicBranch.hashtags))
-                .setRunHooks(false));
-          if (!Strings.isNullOrEmpty(magicBranch.topic)) {
-            bu.addOp(
-                changeId,
-                new BatchUpdate.Op() {
-                  @Override
-                  public boolean updateChange(ChangeContext ctx) {
-                    ctx.getUpdate(psId).setTopic(magicBranch.topic);
-                    return true;
-                  }
-                });
-          }
+              new BatchUpdate.Op() {
+                @Override
+                public boolean updateChange(ChangeContext ctx) {
+                  ctx.getUpdate(psId).setTopic(magicBranch.topic);
+                  return true;
+                }
+              });
         }
         bu.execute();
       }
       change = ins.getChange();
 
-      if (magicBranch != null && magicBranch.submit) {
-        submit(projectControl.controlFor(change), ins.getPatchSet());
+      if (magicBranch.submit) {
+        submit(projectControl.controlFor(state.db, change), ins.getPatchSet());
       }
     }
   }
@@ -1837,7 +1835,8 @@ public class ReceiveCommits {
           changeCtl.getUser().asIdentifiedUser(), false, null);
     }
     addMessage("");
-    Change c = db.changes().get(rsrc.getChange().getId());
+    Change c = notesFactory
+        .create(db, project.getNameKey(), rsrc.getChange().getId()).getChange();
     switch (c.getStatus()) {
       case MERGED:
         addMessage("Change " + c.getChangeId() + " merged.");
@@ -2016,7 +2015,7 @@ public class ReceiveCommits {
         return false;
       }
 
-      changeCtl = projectControl.controlFor(change);
+      changeCtl = projectControl.controlFor(db, change);
       if (!changeCtl.canAddPatchSet(db)) {
         String locked = ".";
         if (changeCtl.isPatchSetLocked(db)) {
@@ -2071,8 +2070,6 @@ public class ReceiveCommits {
               "(W) No changes between prior commit %s and new commit %s",
               reader.abbreviate(priorCommit).name(),
               reader.abbreviate(newCommit).name()));
-          reject(inputCommand, "no changes made");
-          return false;
         } else {
           StringBuilder msg = new StringBuilder();
           msg.append("(W) ");
@@ -2169,6 +2166,9 @@ public class ReceiveCommits {
             try (RequestState state = requestState(caller)) {
               return insertPatchSet(state);
             }
+          } catch (OrmException | IOException  e) {
+            log.error("Failed to insert patch set", e);
+            throw e;
           } finally {
             synchronizedIncrement(replaceProgress);
           }
@@ -2377,8 +2377,8 @@ public class ReceiveCommits {
           @Override
           public void run() {
             try {
-              ReplacePatchSetSender cm =
-                  replacePatchSetFactory.create(change.getId());
+              ReplacePatchSetSender cm = replacePatchSetFactory
+                  .create(project.getNameKey(), change.getId());
               cm.setFrom(me);
               cm.setPatchSet(newPatchSet, info);
               cm.setChangeMessage(msg);
@@ -2448,7 +2448,7 @@ public class ReceiveCommits {
               if (groups == null) {
                 return false;
               }
-            } else if (Sets.newHashSet(oldGroups).equals(groups)) {
+            } else if (sameGroups(oldGroups, groups)) {
               return false;
             }
             psUtil.setGroups(ctx.getDb(), ctx.getUpdate(psId), ps, groups);
@@ -2457,6 +2457,10 @@ public class ReceiveCommits {
         });
         bu.execute();
       }
+    }
+
+    private boolean sameGroups(List<String> a, List<String> b) {
+      return Sets.newHashSet(a).equals(Sets.newHashSet(b));
     }
 
     CheckedFuture<Void, RestApiException> updateGroups() {
@@ -2721,11 +2725,16 @@ public class ReceiveCommits {
     String refName = cmd.getRefName();
     Change.Id cid = psi.getParentKey();
 
-    Change change = db.changes().get(cid);
-    ChangeControl ctl = projectControl.controlFor(change);
+    Change change =
+        notesFactory.create(db, project.getNameKey(), cid).getChange();
+    if (change == null) {
+      log.warn(project.getName() + " change " + cid + " is missing");
+      return null;
+    }
+    ChangeControl ctl = projectControl.controlFor(db, change);
     PatchSet ps = psUtil.get(db, ctl.getNotes(), psi);
-    if (change == null || ps == null) {
-      log.warn(project.getName() + " " + psi + " is missing");
+    if (ps == null) {
+      log.warn(project.getName() + " patch set " + psi + " is missing");
       return null;
     }
 
@@ -2816,8 +2825,8 @@ public class ReceiveCommits {
       @Override
       public void run() {
         try {
-          MergedSender cm =
-              mergedSenderFactory.create(ps.getId().getParentKey());
+          MergedSender cm = mergedSenderFactory.create(project.getNameKey(),
+              ps.getId().getParentKey());
           cm.setFrom(user.getAccountId());
           cm.setPatchSet(ps, info);
           cm.send();

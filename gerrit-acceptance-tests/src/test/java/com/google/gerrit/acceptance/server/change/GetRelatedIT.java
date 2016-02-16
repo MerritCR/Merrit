@@ -16,6 +16,7 @@ package com.google.gerrit.acceptance.server.change;
 
 import static com.google.common.truth.Truth.assertThat;
 import static com.google.gerrit.acceptance.GitUtil.pushHead;
+import static java.util.concurrent.TimeUnit.SECONDS;
 
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Iterables;
@@ -26,6 +27,7 @@ import com.google.gerrit.common.TimeUtil;
 import com.google.gerrit.extensions.common.CommitInfo;
 import com.google.gerrit.reviewdb.client.Change;
 import com.google.gerrit.reviewdb.client.PatchSet;
+import com.google.gerrit.server.change.ChangesCollection;
 import com.google.gerrit.server.change.GetRelated.ChangeAndCommit;
 import com.google.gerrit.server.change.GetRelated.RelatedInfo;
 import com.google.gerrit.server.edit.ChangeEditModifier;
@@ -33,17 +35,34 @@ import com.google.gerrit.server.edit.ChangeEditUtil;
 import com.google.gerrit.server.git.BatchUpdate;
 import com.google.gerrit.server.git.BatchUpdate.ChangeContext;
 import com.google.gerrit.server.query.change.ChangeData;
+import com.google.gerrit.testutil.TestTimeUtil;
 import com.google.gwtorm.server.OrmException;
 import com.google.inject.Inject;
 
 import org.eclipse.jgit.lib.ObjectId;
 import org.eclipse.jgit.revwalk.RevCommit;
+import org.junit.After;
+import org.junit.Before;
 import org.junit.Test;
 
 import java.io.IOException;
 import java.util.List;
 
 public class GetRelatedIT extends AbstractDaemonTest {
+  private String systemTimeZone;
+
+  @Before
+  public void setTimeForTesting() {
+    systemTimeZone = System.setProperty("user.timezone", "US/Eastern");
+    TestTimeUtil.resetWithClockStep(1, SECONDS);
+  }
+
+  @After
+  public void resetTime() {
+    TestTimeUtil.useSystemTime();
+    System.setProperty("user.timezone", systemTimeZone);
+  }
+
   @Inject
   private ChangeEditUtil editUtil;
 
@@ -52,6 +71,9 @@ public class GetRelatedIT extends AbstractDaemonTest {
 
   @Inject
   private BatchUpdate.Factory updateFactory;
+
+  @Inject
+  private ChangesCollection changes;
 
   @Test
   public void getRelatedNoResult() throws Exception {
@@ -73,6 +95,38 @@ public class GetRelatedIT extends AbstractDaemonTest {
     pushHead(testRepo, "refs/for/master", false);
     PatchSet.Id ps1_1 = getPatchSetId(c1_1);
     PatchSet.Id ps2_1 = getPatchSetId(c2_1);
+
+    for (PatchSet.Id ps : ImmutableList.of(ps2_1, ps1_1)) {
+      assertRelated(ps,
+          changeAndCommit(ps2_1, c2_1, 1),
+          changeAndCommit(ps1_1, c1_1, 1));
+    }
+  }
+
+  @Test
+  public void getRelatedLinearSeparatePushes() throws Exception {
+    // 1,1---2,1
+    RevCommit c1_1 = commitBuilder()
+        .add("a.txt", "1")
+        .message("subject: 1")
+        .create();
+    RevCommit c2_1 = commitBuilder()
+        .add("b.txt", "2")
+        .message("subject: 2")
+        .create();
+
+    testRepo.reset(c1_1);
+    pushHead(testRepo, "refs/for/master", false);
+    PatchSet.Id ps1_1 = getPatchSetId(c1_1);
+    String oldETag = changes.parse(ps1_1.getParentKey()).getETag();
+
+    testRepo.reset(c2_1);
+    pushHead(testRepo, "refs/for/master", false);
+    PatchSet.Id ps2_1 = getPatchSetId(c2_1);
+
+    // Push of change 2 should not affect groups (or anything else) of change 1.
+    assertThat(changes.parse(ps1_1.getParentKey()).getETag())
+        .isEqualTo(oldETag);
 
     for (PatchSet.Id ps : ImmutableList.of(ps2_1, ps1_1)) {
       assertRelated(ps,
@@ -573,7 +627,8 @@ public class GetRelatedIT extends AbstractDaemonTest {
 
     // Pretend PS1,1 was pushed before the groups field was added.
     clearGroups(psId1_1);
-    indexer.index(changeDataFactory.create(db, psId1_1.getParentKey()));
+    indexer.index(
+        changeDataFactory.create(db, project, psId1_1.getParentKey()));
 
     // PS1,1 has no groups, so disappeared from related changes.
     assertRelated(psId2_1);

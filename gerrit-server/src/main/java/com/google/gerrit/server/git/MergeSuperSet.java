@@ -15,6 +15,7 @@
 package com.google.gerrit.server.git;
 
 import com.google.common.base.Strings;
+import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Multimap;
 import com.google.gerrit.common.data.SubmitTypeRecord;
 import com.google.gerrit.extensions.client.SubmitType;
@@ -25,6 +26,7 @@ import com.google.gerrit.reviewdb.client.Project;
 import com.google.gerrit.reviewdb.server.ReviewDb;
 import com.google.gerrit.server.change.Submit;
 import com.google.gerrit.server.config.GerritServerConfig;
+import com.google.gerrit.server.index.ChangeField;
 import com.google.gerrit.server.query.change.ChangeData;
 import com.google.gerrit.server.query.change.InternalChangeQuery;
 import com.google.gwtorm.server.OrmException;
@@ -64,6 +66,14 @@ import java.util.Set;
 public class MergeSuperSet {
   private static final Logger log = LoggerFactory.getLogger(MergeOp.class);
 
+  public static void reloadChanges(ChangeSet cs) throws OrmException {
+    // Clear exactly the fields requested by query() below.
+    for (ChangeData cd : cs.changes()) {
+      cd.reloadChange();
+      cd.setPatchSets(null);
+    }
+  }
+
   private final ChangeData.Factory changeDataFactory;
   private final Provider<InternalChangeQuery> queryProvider;
   private final GitRepositoryManager repoManager;
@@ -83,7 +93,8 @@ public class MergeSuperSet {
   public ChangeSet completeChangeSet(ReviewDb db, Change change)
       throws MissingObjectException, IncorrectObjectTypeException, IOException,
       OrmException {
-    ChangeData cd = changeDataFactory.create(db, change.getId());
+    ChangeData cd =
+        changeDataFactory.create(db, change.getProject(), change.getId());
     if (Submit.wholeTopicEnabled(cfg)) {
       return completeChangeSetIncludingTopics(db, new ChangeSet(cd));
     } else {
@@ -101,7 +112,7 @@ public class MergeSuperSet {
       try (Repository repo = repoManager.openRepository(project);
            RevWalk rw = CodeReviewCommit.newRevWalk(repo)) {
         for (Change.Id cId : pc.get(project)) {
-          ChangeData cd = changeDataFactory.create(db, cId);
+          ChangeData cd = changeDataFactory.create(db, project, cId);
 
           SubmitTypeRecord str = cd.submitTypeRecord();
           if (!str.isOk()) {
@@ -143,7 +154,7 @@ public class MergeSuperSet {
           }
 
           if (!hashes.isEmpty()) {
-            Iterable<ChangeData> destChanges = queryProvider.get()
+            Iterable<ChangeData> destChanges = query()
                 .byCommitsOnBranchNotMerged(
                   repo, db, cd.change().getDest(), hashes);
             for (ChangeData chd : destChanges) {
@@ -170,7 +181,7 @@ public class MergeSuperSet {
         chgs.add(cd);
         String topic = cd.change().getTopic();
         if (!Strings.isNullOrEmpty(topic) && !topicsTraversed.contains(topic)) {
-          chgs.addAll(queryProvider.get().byTopicOpen(topic));
+          chgs.addAll(query().byTopicOpen(topic));
           done = false;
           topicsTraversed.add(topic);
         }
@@ -179,6 +190,17 @@ public class MergeSuperSet {
       newCs = completeChangeSetWithoutTopic(db, changes);
     }
     return newCs;
+  }
+
+  private InternalChangeQuery query() {
+    // Request fields required for completing the ChangeSet without having to
+    // touch the database. This provides reasonable performance when loading the
+    // change screen; callers that care about reading the latest value of these
+    // fields should clear them explicitly using reloadChanges().
+    Set<String> fields = ImmutableSet.of(
+        ChangeField.CHANGE.getName(),
+        ChangeField.PATCH_SET.getName());
+    return queryProvider.get().setRequestedFields(fields);
   }
 
   private void logError(String msg) {

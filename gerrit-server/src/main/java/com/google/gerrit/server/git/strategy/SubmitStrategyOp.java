@@ -249,38 +249,24 @@ abstract class SubmitStrategyOp extends BatchUpdate.Op {
 
     Change c = ctx.getChange();
     Change.Id id = c.getId();
+    CodeReviewCommit commit = args.commits.get(id);
+    checkNotNull(commit, "missing commit for change " + id);
+    CommitMergeStatus s = commit.getStatusCode();
+    checkNotNull(s,
+        "status not set for change " + id
+        + " expected to previously fail fast");
+    logDebug("Status of change {} ({}) on {}: {}", id, commit.name(),
+        c.getDest(), s);
+    setApproval(ctx, args.caller);
+
+    mergeResultRev = alreadyMerged == null
+        ? args.mergeTip.getMergeResults().get(commit)
+        // Our fixup code is not smart enough to find a merge commit
+        // corresponding to the merge result. This results in a different
+        // ChangeMergedEvent in the fixup case, but we'll just live with that.
+        : alreadyMerged;
     try {
-      CodeReviewCommit commit = args.commits.get(id);
-      CommitMergeStatus s = commit != null ? commit.getStatusCode() : null;
-      logDebug("Status of change {} ({}) on {}: {}", id, commit.name(),
-          c.getDest(), s);
-      checkState(s != null,
-          "status not set for change %s; expected to previously fail fast",
-          id);
-      setApproval(ctx, args.caller);
-
-      mergeResultRev = alreadyMerged == null
-          ? args.mergeTip.getMergeResults().get(commit)
-          // Our fixup code is not smart enough to find a merge commit
-          // corresponding to the merge result. This results in a different
-          // ChangeMergedEvent in the fixup case, but we'll just live with that.
-          : alreadyMerged;
-      String txt = s.getMessage();
-
-      ChangeMessage msg;
-      if (s == CommitMergeStatus.CLEAN_MERGE) {
-        msg = message(ctx, commit.getPatchsetId(), txt + getByAccountName());
-      } else if (s == CommitMergeStatus.CLEAN_REBASE
-          || s == CommitMergeStatus.CLEAN_PICK) {
-        msg = message(ctx, commit.getPatchsetId(),
-            txt + " as " + commit.name() + getByAccountName());
-      } else if (s == CommitMergeStatus.ALREADY_MERGED) {
-        msg = null;
-      } else {
-        throw new IllegalStateException("unexpected status " + s +
-            " for change " + c.getId() + "; expected to previously fail fast");
-      }
-      setMerged(ctx, msg);
+      setMerged(ctx, message(ctx, commit, s));
     } catch (OrmException err) {
       String msg = "Error updating change status for " + id;
       log.error(msg, err);
@@ -425,6 +411,43 @@ abstract class SubmitStrategyOp extends BatchUpdate.Op {
     return "";
   }
 
+  private ChangeMessage message(ChangeContext ctx, CodeReviewCommit commit,
+      CommitMergeStatus s) {
+    checkNotNull(s, "CommitMergeStatus may not be null");
+    String txt = s.getMessage();
+    if (s == CommitMergeStatus.CLEAN_MERGE) {
+      return message(ctx, commit.getPatchsetId(), txt + getByAccountName());
+    } else if (s == CommitMergeStatus.CLEAN_REBASE
+        || s == CommitMergeStatus.CLEAN_PICK) {
+      return message(ctx, commit.getPatchsetId(),
+          txt + " as " + commit.name() + getByAccountName());
+    } else if (s == CommitMergeStatus.SKIPPED_IDENTICAL_TREE) {
+      return message(ctx, commit.getPatchsetId(), txt);
+    } else if (s == CommitMergeStatus.ALREADY_MERGED) {
+      // Best effort to mimic the message that would have happened had this
+      // succeeded the first time around.
+      switch (args.submitType) {
+        case FAST_FORWARD_ONLY:
+        case MERGE_ALWAYS:
+        case MERGE_IF_NECESSARY:
+          return message(ctx, commit, CommitMergeStatus.CLEAN_MERGE);
+        case CHERRY_PICK:
+          return message(ctx, commit, CommitMergeStatus.CLEAN_PICK);
+        case REBASE_IF_NECESSARY:
+          return message(ctx, commit, CommitMergeStatus.CLEAN_REBASE);
+        default:
+          throw new IllegalStateException("unexpected submit type "
+              + args.submitType.toString()
+              + " for change "
+              + commit.change().getId());
+      }
+    } else {
+      throw new IllegalStateException("unexpected status " + s
+          + " for change " + commit.change().getId()
+          + "; expected to previously fail fast");
+    }
+  }
+
   private ChangeMessage message(ChangeContext ctx, PatchSet.Id psId,
       String body) {
     checkNotNull(psId);
@@ -436,7 +459,7 @@ abstract class SubmitStrategyOp extends BatchUpdate.Op {
     }
     ChangeMessage m = new ChangeMessage(
         new ChangeMessage.Key(psId.getParentKey(), uuid),
-        null, ctx.getWhen(), psId);
+        ctx.getUser().getAccountId(), ctx.getWhen(), psId);
     m.setMessage(body);
     return m;
   }
@@ -481,7 +504,8 @@ abstract class SubmitStrategyOp extends BatchUpdate.Op {
     // Assume the change must have been merged at this point, otherwise we would
     // have failed fast in one of the other steps.
     try {
-      args.mergedSenderFactory.create(getId(), submitter.getAccountId())
+      args.mergedSenderFactory
+          .create(ctx.getProject(), getId(), submitter.getAccountId())
           .sendAsync();
     } catch (Exception e) {
       log.error("Cannot email merged notification for " + getId(), e);

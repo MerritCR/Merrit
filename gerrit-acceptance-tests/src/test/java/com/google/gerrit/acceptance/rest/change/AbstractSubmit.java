@@ -57,6 +57,7 @@ import com.google.gerrit.server.data.PatchSetAttribute;
 import com.google.gerrit.server.events.ChangeMergedEvent;
 import com.google.gerrit.server.events.Event;
 import com.google.gerrit.server.notedb.ChangeNotes;
+import com.google.gerrit.server.project.NoSuchChangeException;
 import com.google.gerrit.testutil.ConfigSuite;
 import com.google.gwtorm.server.OrmException;
 import com.google.inject.Inject;
@@ -92,9 +93,6 @@ public abstract class AbstractSubmit extends AbstractDaemonTest {
   }
 
   private Map<String, String> mergeResults;
-
-  @Inject
-  private ChangeNotes.Factory notesFactory;
 
   @Inject
   private ApprovalsUtil approvalsUtil;
@@ -251,8 +249,10 @@ public abstract class AbstractSubmit extends AbstractDaemonTest {
       if (!expectedExceptionType.isAssignableFrom(e.getClass())
           || !e.getMessage().equals(expectedExceptionMsg)) {
         throw new AssertionError("Expected exception of type "
-            + expectedExceptionType.getSimpleName() + " with message: "
-            + expectedExceptionMsg, e);
+            + expectedExceptionType.getSimpleName() + " with message: \""
+            + expectedExceptionMsg + "\" but got exception of type "
+            + e.getClass().getSimpleName() + " with message \""
+            + e.getMessage() + "\"", e);
       }
       return;
     }
@@ -312,9 +312,10 @@ public abstract class AbstractSubmit extends AbstractDaemonTest {
   }
 
   protected void assertSubmitter(String changeId, int psId)
-      throws OrmException {
-    ChangeNotes cn = notesFactory.create(db,
-        getOnlyElement(queryProvider.get().byKeyPrefix(changeId)).change());
+      throws OrmException, NoSuchChangeException {
+    Change c =
+        getOnlyElement(queryProvider.get().byKeyPrefix(changeId)).change();
+    ChangeNotes cn = notesFactory.createChecked(db, c);
     PatchSetApproval submitter = approvalsUtil.getSubmitter(
         db, cn, new PatchSet.Id(cn.getChangeId(), psId));
     assertThat(submitter).isNotNull();
@@ -323,9 +324,10 @@ public abstract class AbstractSubmit extends AbstractDaemonTest {
   }
 
   protected void assertNoSubmitter(String changeId, int psId)
-      throws OrmException {
-    ChangeNotes cn = notesFactory.create(db,
-        getOnlyElement(queryProvider.get().byKeyPrefix(changeId)).change());
+      throws OrmException, NoSuchChangeException {
+    Change c =
+        getOnlyElement(queryProvider.get().byKeyPrefix(changeId)).change();
+    ChangeNotes cn = notesFactory.createChecked(db, c);
     PatchSetApproval submitter = approvalsUtil.getSubmitter(
         db, cn, new PatchSet.Id(cn.getChangeId(), psId));
     assertThat(submitter).isNull();

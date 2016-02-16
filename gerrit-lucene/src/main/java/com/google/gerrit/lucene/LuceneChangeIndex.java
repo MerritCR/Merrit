@@ -17,7 +17,9 @@ package com.google.gerrit.lucene;
 import static com.google.common.base.Preconditions.checkNotNull;
 import static com.google.common.collect.Iterables.getOnlyElement;
 import static com.google.gerrit.server.git.QueueProvider.QueueType.INTERACTIVE;
+import static com.google.gerrit.server.index.ChangeField.CHANGE;
 import static com.google.gerrit.server.index.ChangeField.LEGACY_ID;
+import static com.google.gerrit.server.index.ChangeField.PROJECT;
 import static com.google.gerrit.server.index.IndexRewriter.CLOSED_STATUSES;
 import static com.google.gerrit.server.index.IndexRewriter.OPEN_STATUSES;
 import static java.util.concurrent.TimeUnit.MILLISECONDS;
@@ -34,6 +36,7 @@ import com.google.gerrit.common.Nullable;
 import com.google.gerrit.reviewdb.client.Account;
 import com.google.gerrit.reviewdb.client.Change;
 import com.google.gerrit.reviewdb.client.PatchSet;
+import com.google.gerrit.reviewdb.client.Project;
 import com.google.gerrit.reviewdb.server.ReviewDb;
 import com.google.gerrit.server.config.ConfigUtil;
 import com.google.gerrit.server.config.GerritServerConfig;
@@ -227,7 +230,7 @@ public class LuceneChangeIndex implements ChangeIndex {
             CUSTOM_CHAR_MAPPING);
     queryBuilder = new QueryBuilder(analyzer);
 
-    BooleanQuery.setMaxClauseCount(cfg.getInt("index", "defaultMaxClauseCount",
+    BooleanQuery.setMaxClauseCount(cfg.getInt("index", "maxTerms",
         BooleanQuery.getMaxClauseCount()));
 
     GerritIndexWriterConfig openConfig =
@@ -429,18 +432,30 @@ public class LuceneChangeIndex implements ChangeIndex {
   }
 
   private Set<String> fields(QueryOptions opts) {
-    if (schemaHasRequestedField(ChangeField.LEGACY_ID, opts.fields())
-        || schemaHasRequestedField(ChangeField.CHANGE, opts.fields())) {
-      return opts.fields();
+    // Ensure we request enough fields to construct a ChangeData.
+    Set<String> fs = opts.fields();
+    if (fs.contains(CHANGE.getName())) {
+      // A Change is always sufficient.
+      return fs;
     }
-    // Request the numeric ID field even if the caller did not request it,
-    // otherwise we can't actually construct a ChangeData.
-    return Sets.union(opts.fields(), ImmutableSet.of(LEGACY_ID.getName()));
-  }
 
-  private boolean schemaHasRequestedField(FieldDef<ChangeData, ?> field,
-      Set<String> requested) {
-    return schema.hasField(field) && requested.contains(field.getName());
+    if (!schema.hasField(PROJECT)) {
+      // Schema is not new enough to have project field. Ensure we have ID
+      // field, and call createOnlyWhenNotedbDisabled from toChangeData below.
+      if (fs.contains(LEGACY_ID.getName())) {
+        return fs;
+      } else {
+        return Sets.union(fs, ImmutableSet.of(LEGACY_ID.getName()));
+      }
+    }
+
+    // New enough schema to have project field, so ensure that is requested.
+    if (fs.contains(PROJECT.getName()) && fs.contains(LEGACY_ID.getName())) {
+      return fs;
+    } else {
+      return Sets.union(fs,
+          ImmutableSet.of(LEGACY_ID.getName(), PROJECT.getName()));
+    }
   }
 
   private ChangeData toChangeData(Document doc, Set<String> fields,
@@ -453,8 +468,17 @@ public class LuceneChangeIndex implements ChangeIndex {
       cd = changeDataFactory.create(db.get(),
           ChangeProtoField.CODEC.decode(cb.bytes, cb.offset, cb.length));
     } else {
-      int id = doc.getField(idFieldName).numericValue().intValue();
-      cd = changeDataFactory.create(db.get(), new Change.Id(id));
+      Change.Id id =
+          new Change.Id(doc.getField(idFieldName).numericValue().intValue());
+      IndexableField project = doc.getField(PROJECT.getName());
+      if (project == null) {
+        // Old schema without project field: we can safely assume notedb is
+        // disabled.
+        cd = changeDataFactory.createOnlyWhenNotedbDisabled(db.get(), id);
+      } else {
+        cd = changeDataFactory.create(
+            db.get(), new Project.NameKey(project.stringValue()), id);
+      }
     }
 
     if (fields.contains(PATCH_SET_FIELD)) {

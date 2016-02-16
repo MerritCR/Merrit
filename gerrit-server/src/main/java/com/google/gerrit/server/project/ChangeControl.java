@@ -34,7 +34,7 @@ import com.google.gerrit.server.notedb.ChangeNotes;
 import com.google.gerrit.server.query.change.ChangeData;
 import com.google.gwtorm.server.OrmException;
 import com.google.inject.Inject;
-import com.google.inject.Provider;
+import com.google.inject.Singleton;
 
 import java.io.IOException;
 import java.util.Collection;
@@ -43,30 +43,31 @@ import java.util.List;
 
 /** Access control management for a user accessing a single change. */
 public class ChangeControl {
+  @Singleton
   public static class GenericFactory {
     private final ProjectControl.GenericFactory projectControl;
-    private final Provider<ReviewDb> db;
+    private final ChangeNotes.Factory notesFactory;
 
     @Inject
-    GenericFactory(ProjectControl.GenericFactory p, Provider<ReviewDb> d) {
+    GenericFactory(
+        ProjectControl.GenericFactory p,
+        ChangeNotes.Factory n) {
       projectControl = p;
-      db = d;
+      notesFactory = n;
     }
 
-    public ChangeControl controlFor(Change.Id changeId, CurrentUser user)
+    public ChangeControl controlFor(ReviewDb db, Project.NameKey project,
+        Change.Id changeId, CurrentUser user)
         throws NoSuchChangeException, OrmException {
-      Change change = db.get().changes().get(changeId);
-      if (change == null) {
-        throw new NoSuchChangeException(changeId);
-      }
-      return controlFor(change, user);
+      return controlFor(notesFactory.create(db, project, changeId), user);
     }
 
-    public ChangeControl controlFor(Change change, CurrentUser user)
-        throws NoSuchChangeException, OrmException {
+    public ChangeControl controlFor(ReviewDb db, Change change,
+        CurrentUser user) throws NoSuchChangeException, OrmException {
       final Project.NameKey projectKey = change.getProject();
       try {
-        return projectControl.controlFor(projectKey, user).controlFor(change);
+        return projectControl.controlFor(projectKey, user)
+            .controlFor(db, change);
       } catch (NoSuchProjectException e) {
         throw new NoSuchChangeException(change.getId(), e);
       } catch (IOException e) {
@@ -85,46 +86,40 @@ public class ChangeControl {
       }
     }
 
-    public ChangeControl validateFor(Change.Id changeId, CurrentUser user)
-        throws NoSuchChangeException, OrmException {
-      Change change = db.get().changes().get(changeId);
-      if (change == null) {
-        throw new NoSuchChangeException(changeId);
-      }
-      return validateFor(change, user);
+    public ChangeControl validateFor(ReviewDb db, Change.Id changeId,
+        CurrentUser user) throws NoSuchChangeException, OrmException {
+      return validateFor(db, notesFactory.createChecked(changeId), user);
     }
 
-    public ChangeControl validateFor(Change change, CurrentUser user)
-        throws NoSuchChangeException, OrmException {
-      ChangeControl c = controlFor(change, user);
-      if (!c.isVisible(db.get())) {
+    public ChangeControl validateFor(ReviewDb db, ChangeNotes notes,
+        CurrentUser user) throws NoSuchChangeException, OrmException {
+      ChangeControl c = controlFor(notes, user);
+      if (!c.isVisible(db)) {
         throw new NoSuchChangeException(c.getId());
       }
       return c;
     }
   }
 
+  @Singleton
   public static class Factory {
-    private final ReviewDb db;
     private final ChangeData.Factory changeDataFactory;
     private final ChangeNotes.Factory notesFactory;
     private final ApprovalsUtil approvalsUtil;
 
     @Inject
-    Factory(ReviewDb db,
-        ChangeData.Factory changeDataFactory,
+    Factory(ChangeData.Factory changeDataFactory,
         ChangeNotes.Factory notesFactory,
         ApprovalsUtil approvalsUtil) {
-      this.db = db;
       this.changeDataFactory = changeDataFactory;
       this.notesFactory = notesFactory;
       this.approvalsUtil = approvalsUtil;
     }
 
-    @SuppressWarnings("unused")
-    ChangeControl create(RefControl refControl, Change change)
-        throws OrmException {
-      return create(refControl, notesFactory.create(db, change));
+    ChangeControl create(RefControl refControl, ReviewDb db, Project.NameKey
+        project, Change.Id changeId) throws OrmException {
+      return create(refControl,
+          notesFactory.create(db, project, changeId));
     }
 
     ChangeControl create(RefControl refControl, ChangeNotes notes) {

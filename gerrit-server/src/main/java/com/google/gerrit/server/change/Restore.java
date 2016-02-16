@@ -112,11 +112,11 @@ public class Restore implements RestModifyView<ChangeResource, RestoreInput>,
         ResourceConflictException {
       caller = ctx.getUser().asIdentifiedUser();
       change = ctx.getChange();
-      PatchSet.Id psId = change.currentPatchSetId();
-      ChangeUpdate update = ctx.getUpdate(psId);
       if (change == null || change.getStatus() != Status.ABANDONED) {
         throw new ResourceConflictException("change is " + status(change));
       }
+      PatchSet.Id psId = change.currentPatchSetId();
+      ChangeUpdate update = ctx.getUpdate(psId);
       patchSet = psUtil.get(ctx.getDb(), ctx.getNotes(), psId);
       change.setStatus(Status.NEW);
       change.setLastUpdatedOn(ctx.getWhen());
@@ -150,7 +150,8 @@ public class Restore implements RestModifyView<ChangeResource, RestoreInput>,
     @Override
     public void postUpdate(Context ctx) throws OrmException {
       try {
-        ReplyToChangeSender cm = restoredSenderFactory.create(change.getId());
+        ReplyToChangeSender cm =
+            restoredSenderFactory.create(ctx.getProject(), change.getId());
         cm.setFrom(caller.getAccountId());
         cm.setChangeMessage(message);
         cm.send();

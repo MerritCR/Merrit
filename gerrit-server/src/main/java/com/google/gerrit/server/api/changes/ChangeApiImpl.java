@@ -38,12 +38,14 @@ import com.google.gerrit.server.change.ChangeEdits;
 import com.google.gerrit.server.change.ChangeJson;
 import com.google.gerrit.server.change.ChangeResource;
 import com.google.gerrit.server.change.Check;
+import com.google.gerrit.server.change.DeleteDraftChange;
 import com.google.gerrit.server.change.GetHashtags;
 import com.google.gerrit.server.change.GetTopic;
 import com.google.gerrit.server.change.ListChangeComments;
 import com.google.gerrit.server.change.ListChangeDrafts;
 import com.google.gerrit.server.change.PostHashtags;
 import com.google.gerrit.server.change.PostReviewers;
+import com.google.gerrit.server.change.PublishDraftPatchSet;
 import com.google.gerrit.server.change.PutTopic;
 import com.google.gerrit.server.change.Restore;
 import com.google.gerrit.server.change.Revert;
@@ -52,6 +54,7 @@ import com.google.gerrit.server.change.Revisions;
 import com.google.gerrit.server.change.SubmittedTogether;
 import com.google.gerrit.server.change.SuggestReviewers;
 import com.google.gerrit.server.git.UpdateException;
+import com.google.gerrit.server.project.NoSuchChangeException;
 import com.google.gwtorm.server.OrmException;
 import com.google.inject.Inject;
 import com.google.inject.Provider;
@@ -80,6 +83,9 @@ class ChangeApiImpl implements ChangeApi {
   private final Revert revert;
   private final Restore restore;
   private final SubmittedTogether submittedTogether;
+  private final PublishDraftPatchSet.CurrentRevision
+    publishDraftChange;
+  private final DeleteDraftChange deleteDraftChange;
   private final GetTopic getTopic;
   private final PutTopic putTopic;
   private final PostReviewers postReviewers;
@@ -103,6 +109,8 @@ class ChangeApiImpl implements ChangeApi {
       Revert revert,
       Restore restore,
       SubmittedTogether submittedTogether,
+      PublishDraftPatchSet.CurrentRevision publishDraftChange,
+      DeleteDraftChange deleteDraftChange,
       GetTopic getTopic,
       PutTopic putTopic,
       PostReviewers postReviewers,
@@ -125,6 +133,8 @@ class ChangeApiImpl implements ChangeApi {
     this.abandon = abandon;
     this.restore = restore;
     this.submittedTogether = submittedTogether;
+    this.publishDraftChange = publishDraftChange;
+    this.deleteDraftChange = deleteDraftChange;
     this.getTopic = getTopic;
     this.putTopic = putTopic;
     this.postReviewers = postReviewers;
@@ -210,7 +220,8 @@ class ChangeApiImpl implements ChangeApi {
   public ChangeApi revert(RevertInput in) throws RestApiException {
     try {
       return changeApi.id(revert.apply(change, in)._number);
-    } catch (OrmException | IOException | UpdateException e) {
+    } catch (OrmException | IOException | UpdateException
+        | NoSuchChangeException e) {
       throw new RestApiException("Cannot revert change", e);
     }
   }
@@ -221,6 +232,24 @@ class ChangeApiImpl implements ChangeApi {
       return submittedTogether.apply(change);
     } catch (Exception e) {
       throw new RestApiException("Cannot query submittedTogether", e);
+    }
+  }
+
+  @Override
+  public void publish() throws RestApiException {
+    try {
+      publishDraftChange.apply(change, null);
+    } catch (UpdateException e) {
+      throw new RestApiException("Cannot publish change", e);
+    }
+  }
+
+  @Override
+  public void delete() throws RestApiException {
+    try {
+      deleteDraftChange.apply(change, null);
+    } catch (UpdateException e) {
+      throw new RestApiException("Cannot delete change", e);
     }
   }
 
@@ -251,7 +280,7 @@ class ChangeApiImpl implements ChangeApi {
   public void addReviewer(AddReviewerInput in) throws RestApiException {
     try {
       postReviewers.apply(change, in);
-    } catch (OrmException | IOException e) {
+    } catch (OrmException | IOException | UpdateException e) {
       throw new RestApiException("Cannot add change reviewer", e);
     }
   }

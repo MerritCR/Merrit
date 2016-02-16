@@ -96,9 +96,11 @@ import com.google.gerrit.server.api.accounts.GpgApiAdapter;
 import com.google.gerrit.server.git.GitRepositoryManager;
 import com.google.gerrit.server.git.LabelNormalizer;
 import com.google.gerrit.server.git.MergeUtil;
+import com.google.gerrit.server.notedb.ChangeNotes;
 import com.google.gerrit.server.notedb.ReviewerStateInternal;
 import com.google.gerrit.server.patch.PatchListNotAvailableException;
 import com.google.gerrit.server.project.ChangeControl;
+import com.google.gerrit.server.project.NoSuchChangeException;
 import com.google.gerrit.server.project.ProjectCache;
 import com.google.gerrit.server.project.SubmitRuleEvaluator;
 import com.google.gerrit.server.query.change.ChangeData;
@@ -156,6 +158,7 @@ public class ChangeJson {
   private final Provider<ConsistencyChecker> checkerProvider;
   private final ActionJson actionJson;
   private final GpgApiAdapter gpgApi;
+  private final ChangeNotes.Factory notesFactory;
 
   private AccountLoader accountLoader;
   private Map<Change.Id, List<SubmitRecord>> submitRecords;
@@ -181,6 +184,7 @@ public class ChangeJson {
       Provider<ConsistencyChecker> checkerProvider,
       ActionJson actionJson,
       GpgApiAdapter gpgApi,
+      ChangeNotes.Factory notesFactory,
       @Assisted Set<ListChangesOption> options) {
     this.db = db;
     this.labelNormalizer = ln;
@@ -200,6 +204,7 @@ public class ChangeJson {
     this.checkerProvider = checkerProvider;
     this.actionJson = actionJson;
     this.gpgApi = gpgApi;
+    this.notesFactory = notesFactory;
     this.options = options.isEmpty()
         ? EnumSet.noneOf(ListChangesOption.class)
         : EnumSet.copyOf(options);
@@ -218,32 +223,18 @@ public class ChangeJson {
     return format(changeDataFactory.create(db.get(), change));
   }
 
-  public ChangeInfo format(Change.Id id) throws OrmException {
+  public ChangeInfo format(Project.NameKey project, Change.Id id)
+      throws OrmException, NoSuchChangeException {
     Change c;
     try {
-      c = db.get().changes().get(id);
-    } catch (OrmException e) {
+      c = notesFactory.createChecked(db.get(), project, id).getChange();
+    } catch (OrmException | NoSuchChangeException e) {
       if (!has(CHECK)) {
         throw e;
       }
-      return checkOnly(changeDataFactory.create(db.get(), id));
+      return checkOnly(changeDataFactory.create(db.get(), project, id));
     }
     return format(changeDataFactory.create(db.get(), c));
-  }
-
-  public List<ChangeInfo> format(Collection<Change.Id> ids) throws OrmException {
-    List<ChangeData> changes = new ArrayList<>(ids.size());
-    List<ChangeInfo> ret = new ArrayList<>(ids.size());
-    ReviewDb reviewDb = db.get();
-    for (Change.Id id : ids) {
-      changes.add(changeDataFactory.create(reviewDb, id));
-    }
-    accountLoader = accountLoaderFactory.create(has(DETAILED_ACCOUNTS));
-    for (ChangeData cd : changes) {
-      ret.add(format(cd, Optional.<PatchSet.Id> absent(), false));
-    }
-    accountLoader.fill();
-    return ret;
   }
 
   public ChangeInfo format(ChangeData cd) throws OrmException {
@@ -391,7 +382,7 @@ public class ChangeJson {
       // If any problems were fixed, the ChangeData needs to be reloaded.
       for (ProblemInfo p : out.problems) {
         if (p.status == ProblemInfo.Status.FIXED) {
-          cd = changeDataFactory.create(cd.db(), cd.getId());
+          cd = changeDataFactory.create(cd.db(), cd.project(), cd.getId());
           break;
         }
       }
@@ -433,6 +424,7 @@ public class ChangeJson {
     }
 
     out.labels = labelsFor(ctl, cd, has(LABELS), has(DETAILED_LABELS));
+    out.submitted = getSubmittedOn(cd);
 
     if (out.labels != null && has(DETAILED_LABELS)) {
       // If limited to specific patch sets but not the current patch set, don't
@@ -661,6 +653,12 @@ public class ChangeJson {
         addApproval(e.getValue().label(), approvalInfo(accountId, value, date));
       }
     }
+  }
+
+  private Timestamp getSubmittedOn(ChangeData cd)
+      throws OrmException {
+    Optional<PatchSetApproval> s = cd.getSubmitApproval();
+    return s.isPresent() ? s.get().getGranted() : null;
   }
 
   private Map<String, LabelWithStatus> labelsForClosedChange(ChangeData cd,
