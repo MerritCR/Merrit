@@ -69,6 +69,7 @@ import com.google.gerrit.server.account.GroupDetailFactory;
 import com.google.gerrit.server.account.GroupIncludeCacheImpl;
 import com.google.gerrit.server.account.GroupInfoCacheFactory;
 import com.google.gerrit.server.account.GroupMembers;
+import com.google.gerrit.server.api.accounts.AccountExternalIdCreator;
 import com.google.gerrit.server.auth.AuthBackend;
 import com.google.gerrit.server.auth.UniversalAuthBackend;
 import com.google.gerrit.server.avatar.AvatarProvider;
@@ -85,6 +86,7 @@ import com.google.gerrit.server.git.GitModule;
 import com.google.gerrit.server.git.MergeUtil;
 import com.google.gerrit.server.git.NotesBranchUtil;
 import com.google.gerrit.server.git.ReceivePackInitializer;
+import com.google.gerrit.server.git.ReplaceOp;
 import com.google.gerrit.server.git.TagCache;
 import com.google.gerrit.server.git.TransferConfig;
 import com.google.gerrit.server.git.strategy.SubmitStrategy;
@@ -302,6 +304,7 @@ public class GerritGlobalModule extends FactoryModule {
     DynamicSet.setOf(binder(), ProjectWebLink.class);
     DynamicSet.setOf(binder(), BranchWebLink.class);
     DynamicMap.mapOf(binder(), OAuthLoginProvider.class);
+    DynamicSet.setOf(binder(), AccountExternalIdCreator.class);
 
     factory(UploadValidators.Factory.class);
     DynamicSet.setOf(binder(), UploadValidationListener.class);
@@ -316,6 +319,7 @@ public class GerritGlobalModule extends FactoryModule {
     factory(ProjectConfigValidator.Factory.class);
     factory(NotesBranchUtil.Factory.class);
     factory(SubmoduleSectionParser.Factory.class);
+    factory(ReplaceOp.Factory.class);
 
     bind(AccountManager.class);
     factory(ChangeUserName.Factory.class);

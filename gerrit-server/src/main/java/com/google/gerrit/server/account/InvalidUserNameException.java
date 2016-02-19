@@ -1,4 +1,4 @@
-// Copyright (C) 2008 The Android Open Source Project
+// Copyright (C) 2009 The Android Open Source Project
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,20 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package com.google.gerrit.client.ui;
+package com.google.gerrit.server.account;
 
-import com.google.gerrit.common.data.SuggestService;
-import com.google.gwt.core.client.GWT;
-import com.google.gwtjsonrpc.client.JsonUtil;
+import com.google.gerrit.reviewdb.client.Account;
 
-public class SuggestUtil {
-  public static final SuggestService SVC;
+/** Error indicating the SSH user name does not match {@link Account#USER_NAME_PATTERN} pattern. */
+public class InvalidUserNameException extends Exception {
 
-  static {
-    SVC = GWT.create(SuggestService.class);
-    JsonUtil.bind(SVC, "rpc/SuggestService");
-  }
+  private static final long serialVersionUID = 1L;
 
-  private SuggestUtil() {
+  public static final String MESSAGE = "Invalid user name.";
+
+  public InvalidUserNameException() {
+    super(MESSAGE);
   }
 }
