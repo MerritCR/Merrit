@@ -15,6 +15,7 @@ limitations under the License.
 -->
 
 <link rel="import" href="../bower_components/polymer/polymer.html">
+<link rel="import" href="../behaviors/keyboard-shortcut-behavior.html">
 <link rel="import" href="../styles/app-theme.html">
 <link rel="import" href="gr-account-dropdown.html">
 <link rel="import" href="gr-ajax.html">
@@ -22,6 +23,8 @@ limitations under the License.
 <link rel="import" href="gr-change-view.html">
 <link rel="import" href="gr-dashboard-view.html">
 <link rel="import" href="gr-diff-view.html">
+<link rel="import" href="gr-keyboard-shortcuts-dialog.html">
+<link rel="import" href="gr-overlay.html">
 <link rel="import" href="gr-search-bar.html">
 
 <script src="../bower_components/page/page.js"></script>
@@ -44,8 +47,9 @@ limitations under the License.
         padding: .5rem 1.25rem;
       }
       header {
-        display: flex;
         align-items: center;
+        display: flex;
+        overflow: hidden;
       }
       main {
         flex: 1;
@@ -64,6 +68,7 @@ limitations under the License.
         justify-content: flex-end;
       }
       gr-search-bar {
+        margin-left: .5em;
         width: 500px;
       }
       .accountContainer:not(.loggedIn):not(.loggedOut) .loginButton,
@@ -76,9 +81,24 @@ limitations under the License.
         align-items: center;
         display: flex;
         margin-left: var(--default-horizontal-margin);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
       }
       .feedback {
         color: #b71c1c;
+      }
+      @media screen and (max-width: 60em) {
+        .bigTitle {
+          font-size: 14px;
+          font-weight: bold;
+        }
+        gr-search-bar {
+          width: auto;
+        }
+        .accountContainer {
+          margin-left: .5em !important;
+        }
       }
     </style>
     <gr-ajax auto url="/accounts/self/detail" last-response="{{account}}"></gr-ajax>
@@ -139,6 +159,11 @@ limitations under the License.
         PolyGerrit Feedback
       </a>
     </footer>
+    <gr-overlay id="keyboardShortcuts" with-backdrop>
+      <gr-keyboard-shortcuts-dialog
+          view="[[params.view]]"
+          on-close="_handleKeyboardShortcutDialogClose"></gr-keyboard-shortcuts-dialog>
+    </gr-overlay>
   </template>
   <script>
   (function() {
@@ -178,6 +203,10 @@ limitations under the License.
         },
         version: String,
         params: Object,
+        keyEventTarget: {
+          type: Object,
+          value: function() { return document.body; },
+        },
 
         _diffPreferences: Object,
         _showChangeListView: Boolean,
@@ -193,6 +222,10 @@ limitations under the License.
 
       observers: [
         '_viewChanged(params.view)',
+      ],
+
+      behaviors: [
+        Gerrit.KeyboardShortcutBehavior,
       ],
 
       get loggedIn() {
@@ -275,6 +308,20 @@ limitations under the License.
         }
       },
 
+      _handleKey: function(e) {
+        if (this.shouldSupressKeyboardShortcut(e)) { return; }
+
+        switch (e.keyCode) {
+          case 191:  // '/' or '?' with shift key.
+            // TODO(andybons): Localization using e.key/keypress event.
+            if (!e.shiftKey) { break; }
+            this.$.keyboardShortcuts.open();
+        }
+      },
+
+      _handleKeyboardShortcutDialogClose: function() {
+        this.$.keyboardShortcuts.close();
+      },
     });
   })();
   </script>

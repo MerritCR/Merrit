@@ -150,7 +150,8 @@ limitations under the License.
         .changeInfo {
           flex-wrap: wrap;
         }
-        .changeInfo-column {
+        .changeInfo-column,
+        .changeInfo-column:not(:last-of-type) {
           margin-right: 0;
         }
         .changeInfo-column:not(:first-of-type) {
@@ -158,6 +159,49 @@ limitations under the License.
         }
       }
       @media screen and (max-width: 60em) {
+        .container {
+          margin: .5em 0 !important;
+        }
+        .headerContainer {
+          height: 5.15em;
+        }
+        .header {
+          align-items: flex-start;
+          flex-direction: column;
+          padding: .5em 1.25rem !important;
+        }
+        gr-change-star {
+          vertical-align: middle;
+        }
+        .header-title,
+        .header-actions,
+        .header.pinned {
+          width: 100% !important;
+        }
+        .header-title {
+          font-size: 1.1em;
+        }
+        .header-actions {
+          align-items: center;
+          display: flex;
+          justify-content: space-between;
+          margin-top: .5em;
+        }
+        .download {
+          display: none;
+        }
+        .patchSelectLabel {
+          margin-left: 0 !important;
+          margin-right: .5em;
+        }
+        .header select {
+          margin-left: 0 !important;
+          margin-right: .5em;
+        }
+        .header gr-reply-dropdown {
+          margin-left: 0 !important;
+          margin-right: .5em;
+        }
         .changeInfo {
           flex-direction: column;
           flex-wrap: nowrap;
@@ -191,26 +235,30 @@ limitations under the License.
             <gr-change-star change="{{_change}}" hidden$="[[!_loggedIn]]"></gr-change-star>
             <a href$="[[_computeChangePermalink(_change._number)]]">[[_change._number]]</a><span>:</span>
             <span>[[_change.subject]]</span>
-            <span class="changeStatus">[[_computeChangeStatus(_change.status)]]</span>
+            <span class="changeStatus">[[_computeChangeStatus(_change, _patchNum)]]</span>
           </span>
-          <gr-reply-dropdown id="replyDropdown"
-              change-num="[[_changeNum]]"
-              patch-num="[[_patchNum]]"
-              labels="[[_change.labels]]"
-              permitted-labels="[[_change.permitted_labels]]"
-              on-send="_handleReplySent"
-              hidden$="[[!_loggedIn]]">Reply</gr-reply-dropdown>
-          <gr-button link class="download" on-tap="_handleDownloadTap">Download</gr-button>
-          <label class="patchSelectLabel" for="patchSetSelect">Patch set</label>
-          <select id="patchSetSelect" on-change="_handlePatchChange">
-            <template is="dom-repeat" items="{{_allPatchSets}}" as="patchNumber">
-              <option value$="[[patchNumber]]" selected$="[[_computePatchIndexIsSelected(index, _patchNum)]]">
-                <span>[[patchNumber]]</span>
-                /
-                <span>[[_computeLatestPatchNum(_change)]]</span>
-              </option>
-            </template>
-          </select>
+          <span class="header-actions">
+            <gr-reply-dropdown id="replyDropdown"
+                change-num="[[_changeNum]]"
+                patch-num="[[_patchNum]]"
+                labels="[[_change.labels]]"
+                permitted-labels="[[_change.permitted_labels]]"
+                on-send="_handleReplySent"
+                hidden$="[[!_loggedIn]]">Reply</gr-reply-dropdown>
+            <gr-button link class="download" on-tap="_handleDownloadTap">Download</gr-button>
+            <span>
+              <label class="patchSelectLabel" for="patchSetSelect">Patch set</label>
+              <select id="patchSetSelect" on-change="_handlePatchChange">
+                <template is="dom-repeat" items="{{_allPatchSets}}" as="patchNumber">
+                  <option value$="[[patchNumber]]" selected$="[[_computePatchIndexIsSelected(index, _patchNum)]]">
+                    <span>[[patchNumber]]</span>
+                    /
+                    <span>[[_computeLatestPatchNum(_change)]]</span>
+                  </option>
+                </template>
+              </select>
+            </span>
+          </span>
         </div>
       </div>
       <section class="changeInfo">
@@ -500,9 +548,13 @@ limitations under the License.
         return '/' + changeNum;
       },
 
-      _computeChangeStatus: function(status) {
+      _computeChangeStatus: function(change, patchNum) {
+        var status = change.status;
         if (status == this.ChangeStatus.NEW) {
-          return '';
+          var rev = this._getRevisionNumber(change, patchNum);
+          // TODO(davido): Figure out, why sometimes revision is not there
+          if (rev == undefined || !rev.draft) { return ''; }
+          status = this.ChangeStatus.DRAFT;
         }
         return '(' + status.toLowerCase() + ')';
       },
@@ -544,6 +596,14 @@ limitations under the License.
         return patchNums.sort(function(a, b) {
           return a - b;
         });
+      },
+
+      _getRevisionNumber: function(change, patchNum) {
+        for (var rev in change.revisions) {
+          if (change.revisions[rev]._number == patchNum) {
+            return change.revisions[rev];
+          }
+        }
       },
 
       _computePatchIndexIsSelected: function(index, patchNum) {

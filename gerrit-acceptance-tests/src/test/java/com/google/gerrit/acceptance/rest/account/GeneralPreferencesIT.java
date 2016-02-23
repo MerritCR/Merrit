@@ -15,7 +15,6 @@
 package com.google.gerrit.acceptance.rest.account;
 
 import static com.google.common.truth.Truth.assertThat;
-import static org.junit.Assert.assertEquals;
 
 import com.google.gerrit.acceptance.AbstractDaemonTest;
 import com.google.gerrit.acceptance.RestResponse;
@@ -29,7 +28,6 @@ import com.google.gerrit.extensions.client.GeneralPreferencesInfo.ReviewCategory
 import com.google.gerrit.extensions.client.GeneralPreferencesInfo.TimeFormat;
 import com.google.gerrit.extensions.client.MenuItem;
 
-import org.apache.http.HttpStatus;
 import org.junit.Before;
 import org.junit.Test;
 
@@ -48,16 +46,15 @@ public class GeneralPreferencesIT extends AbstractDaemonTest {
   @Test
   public void getDiffPreferencesOfNonExistingAccount_NotFound()
       throws Exception {
-    assertEquals(HttpStatus.SC_NOT_FOUND,
-        adminSession.get("/accounts/non-existing/preferences")
-        .getStatusCode());
+    RestResponse r = adminSession.get("/accounts/non-existing/preferences");
+    r.assertNotFound();
   }
 
   @Test
   public void getAndSetPreferences() throws Exception {
     RestResponse r = adminSession.get("/accounts/" + user42.email
         + "/preferences");
-    assertEquals(HttpStatus.SC_OK, r.getStatusCode());
+    r.assertOK();
     GeneralPreferencesInfo d = GeneralPreferencesInfo.defaults();
     GeneralPreferencesInfo o =
         newGson().fromJson(r.getReader(), GeneralPreferencesInfo.class);
@@ -75,6 +72,7 @@ public class GeneralPreferencesIT extends AbstractDaemonTest {
     assertThat(o.legacycidInChangeTable).isNull();
     assertThat(o.muteCommonPathPrefixes).isEqualTo(
         d.muteCommonPathPrefixes);
+    assertThat(o.signedOffBy).isNull();
     assertThat(o.reviewCategoryStrategy).isEqualTo(
         d.getReviewCategoryStrategy());
     assertThat(o.diffView).isEqualTo(d.getDiffView());
@@ -96,6 +94,7 @@ public class GeneralPreferencesIT extends AbstractDaemonTest {
     i.sizeBarInChangeTable ^= true;
     i.legacycidInChangeTable ^= true;
     i.muteCommonPathPrefixes ^= true;
+    i.signedOffBy ^= true;
     i.reviewCategoryStrategy = ReviewCategoryStrategy.ABBREV;
     i.diffView = DiffView.UNIFIED_DIFF;
     i.my = new ArrayList<>();
@@ -104,7 +103,7 @@ public class GeneralPreferencesIT extends AbstractDaemonTest {
     i.urlAliases.put("foo", "bar");
 
     r = adminSession.put("/accounts/" + user42.email + "/preferences", i);
-    assertEquals(HttpStatus.SC_OK, r.getStatusCode());
+    r.assertOK();
     o = newGson().fromJson(r.getReader(), GeneralPreferencesInfo.class);
 
     assertThat(o.changesPerPage).isEqualTo(i.changesPerPage);
@@ -120,6 +119,7 @@ public class GeneralPreferencesIT extends AbstractDaemonTest {
     assertThat(o.sizeBarInChangeTable).isNull();
     assertThat(o.legacycidInChangeTable).isEqualTo(i.legacycidInChangeTable);
     assertThat(o.muteCommonPathPrefixes).isNull();
+    assertThat(o.signedOffBy).isEqualTo(i.signedOffBy);
     assertThat(o.reviewCategoryStrategy).isEqualTo(
         i.getReviewCategoryStrategy());
     assertThat(o.diffView).isEqualTo(i.getDiffView());

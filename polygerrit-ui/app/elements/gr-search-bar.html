@@ -23,11 +23,10 @@ limitations under the License.
   <template>
     <style>
       :host {
-        display: block;
+        display: inline-block;
       }
       form {
         display: flex;
-        margin-left: 3em;
       }
       input {
         border: 1px solid #d1d2d3;
@@ -99,7 +98,9 @@ limitations under the License.
       _handleKey: function(e) {
         if (this.shouldSupressKeyboardShortcut(e)) { return; }
         switch (e.keyCode) {
-          case 191:  // '/'
+          case 191:  // '/' or '?' with shift key.
+            // TODO(andybons): Localization using e.key/keypress event.
+            if (e.shiftKey) { break; }
             e.preventDefault();
             var s = this.$.searchInput;
             s.focus();
