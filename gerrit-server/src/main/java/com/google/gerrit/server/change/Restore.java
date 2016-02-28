@@ -31,7 +31,6 @@ import com.google.gerrit.reviewdb.client.PatchSet;
 import com.google.gerrit.reviewdb.server.ReviewDb;
 import com.google.gerrit.server.ChangeMessagesUtil;
 import com.google.gerrit.server.ChangeUtil;
-import com.google.gerrit.server.IdentifiedUser;
 import com.google.gerrit.server.PatchSetUtil;
 import com.google.gerrit.server.git.BatchUpdate;
 import com.google.gerrit.server.git.BatchUpdate.ChangeContext;
@@ -101,7 +100,6 @@ public class Restore implements RestModifyView<ChangeResource, RestoreInput>,
     private Change change;
     private PatchSet patchSet;
     private ChangeMessage message;
-    private IdentifiedUser caller;
 
     private Op(RestoreInput input) {
       this.input = input;
@@ -110,7 +108,6 @@ public class Restore implements RestModifyView<ChangeResource, RestoreInput>,
     @Override
     public boolean updateChange(ChangeContext ctx) throws OrmException,
         ResourceConflictException {
-      caller = ctx.getUser().asIdentifiedUser();
       change = ctx.getChange();
       if (change == null || change.getStatus() != Status.ABANDONED) {
         throw new ResourceConflictException("change is " + status(change));
@@ -123,12 +120,12 @@ public class Restore implements RestModifyView<ChangeResource, RestoreInput>,
       ctx.saveChange();
       update.setStatus(change.getStatus());
 
-      message = newMessage(ctx.getDb());
+      message = newMessage(ctx);
       cmUtil.addChangeMessage(ctx.getDb(), update, message);
       return true;
     }
 
-    private ChangeMessage newMessage(ReviewDb db) throws OrmException {
+    private ChangeMessage newMessage(ChangeContext ctx) throws OrmException {
       StringBuilder msg = new StringBuilder();
       msg.append("Restored");
       if (!Strings.nullToEmpty(input.message).trim().isEmpty()) {
@@ -139,9 +136,9 @@ public class Restore implements RestModifyView<ChangeResource, RestoreInput>,
       ChangeMessage message = new ChangeMessage(
           new ChangeMessage.Key(
               change.getId(),
-              ChangeUtil.messageUUID(db)),
-          caller.getAccountId(),
-          change.getLastUpdatedOn(),
+              ChangeUtil.messageUUID(ctx.getDb())),
+          ctx.getUser().getAccountId(),
+          ctx.getWhen(),
           change.currentPatchSetId());
       message.setMessage(msg.toString());
       return message;
@@ -152,14 +149,14 @@ public class Restore implements RestModifyView<ChangeResource, RestoreInput>,
       try {
         ReplyToChangeSender cm =
             restoredSenderFactory.create(ctx.getProject(), change.getId());
-        cm.setFrom(caller.getAccountId());
+        cm.setFrom(ctx.getUser().getAccountId());
         cm.setChangeMessage(message);
         cm.send();
       } catch (Exception e) {
         log.error("Cannot email update for change " + change.getId(), e);
       }
       hooks.doChangeRestoredHook(change,
-          caller.getAccount(),
+          ctx.getUser().asIdentifiedUser().getAccount(),
           patchSet,
           Strings.emptyToNull(input.message),
           ctx.getDb());

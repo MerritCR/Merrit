@@ -137,32 +137,59 @@ public class ChangeIT extends AbstractDaemonTest {
   @Test
   public void abandon() throws Exception {
     PushOneCommit.Result r = createChange();
-    assertThat(info(r.getChangeId()).status).isEqualTo(ChangeStatus.NEW);
+    String changeId = r.getChangeId();
+    assertThat(info(changeId).status).isEqualTo(ChangeStatus.NEW);
     gApi.changes()
-        .id(r.getChangeId())
+        .id(changeId)
         .abandon();
-    ChangeInfo info = get(r.getChangeId());
+    ChangeInfo info = get(changeId);
     assertThat(info.status).isEqualTo(ChangeStatus.ABANDONED);
     assertThat(Iterables.getLast(info.messages).message.toLowerCase())
         .contains("abandoned");
+
+    exception.expect(ResourceConflictException.class);
+    exception.expectMessage("change is abandoned");
+    gApi.changes()
+        .id(changeId)
+        .abandon();
+  }
+
+  @Test
+  public void abandonDraft() throws Exception {
+    PushOneCommit.Result r = createDraftChange();
+    String changeId = r.getChangeId();
+    assertThat(info(changeId).status).isEqualTo(ChangeStatus.DRAFT);
+
+    exception.expect(ResourceConflictException.class);
+    exception.expectMessage("draft changes cannot be abandoned");
+    gApi.changes()
+        .id(changeId)
+        .abandon();
   }
 
   @Test
   public void restore() throws Exception {
     PushOneCommit.Result r = createChange();
-    assertThat(info(r.getChangeId()).status).isEqualTo(ChangeStatus.NEW);
+    String changeId = r.getChangeId();
+    assertThat(info(changeId).status).isEqualTo(ChangeStatus.NEW);
     gApi.changes()
-        .id(r.getChangeId())
+        .id(changeId)
         .abandon();
-    assertThat(info(r.getChangeId()).status).isEqualTo(ChangeStatus.ABANDONED);
+    assertThat(info(changeId).status).isEqualTo(ChangeStatus.ABANDONED);
 
     gApi.changes()
-        .id(r.getChangeId())
+        .id(changeId)
         .restore();
-    ChangeInfo info = get(r.getChangeId());
+    ChangeInfo info = get(changeId);
     assertThat(info.status).isEqualTo(ChangeStatus.NEW);
     assertThat(Iterables.getLast(info.messages).message.toLowerCase())
         .contains("restored");
+
+    exception.expect(ResourceConflictException.class);
+    exception.expectMessage("change is new");
+    gApi.changes()
+        .id(changeId)
+        .restore();
   }
 
   @Test
@@ -233,25 +260,34 @@ public class ChangeIT extends AbstractDaemonTest {
     revision.review(ReviewInput.approve());
     revision.submit();
 
+    String changeId = r2.getChangeId();
     // Rebase the second change
     gApi.changes()
-        .id(r2.getChangeId())
+        .id(changeId)
         .current()
         .rebase();
 
     // Second change should have 2 patch sets
-    ChangeInfo c2 = gApi.changes().id(r2.getChangeId()).get();
+    ChangeInfo c2 = gApi.changes().id(changeId).get();
     assertThat(c2.revisions.get(c2.currentRevision)._number).isEqualTo(2);
 
     // ...and the committer should be correct
     ChangeInfo info = gApi.changes()
-        .id(r2.getChangeId()).get(EnumSet.of(
+        .id(changeId).get(EnumSet.of(
             ListChangesOption.CURRENT_REVISION,
             ListChangesOption.CURRENT_COMMIT));
     GitPerson committer = info.revisions.get(
         info.currentRevision).commit.committer;
     assertThat(committer.name).isEqualTo(admin.fullName);
     assertThat(committer.email).isEqualTo(admin.email);
+
+    // Rebasing the second change again should fail
+    exception.equals(ResourceConflictException.class);
+    exception.expectMessage("Change is already up to date");
+    gApi.changes()
+        .id(changeId)
+        .current()
+        .rebase();
   }
 
   @Test
@@ -306,9 +342,11 @@ public class ChangeIT extends AbstractDaemonTest {
     assertThat(approval.value).isEqualTo(1);
   }
 
-  @Test(expected = ResourceConflictException.class)
+  @Test
   public void rebaseUpToDateChange() throws Exception {
     PushOneCommit.Result r = createChange();
+    exception.equals(ResourceConflictException.class);
+    exception.expectMessage("Change is already up to date");
     gApi.changes()
         .id(r.getChangeId())
         .revision(r.getCommit().name())
@@ -383,16 +421,81 @@ public class ChangeIT extends AbstractDaemonTest {
     assertThat(r1.getPatchSetId().get()).isEqualTo(3);
   }
 
-  @Test(expected = ResourceConflictException.class)
+  @Test
   public void rebaseChangeBaseRecursion() throws Exception {
     PushOneCommit.Result r1 = createChange();
     PushOneCommit.Result r2 = createChange();
 
     RebaseInput ri = new RebaseInput();
     ri.base = r2.getCommit().name();
+    String expectedMessage = "base change " + r2.getChangeId()
+        + " is a descendant of the current change - recursion not allowed";
+    exception.expect(ResourceConflictException.class);
+    exception.expectMessage(expectedMessage);
     gApi.changes()
         .id(r1.getChangeId())
         .revision(r1.getCommit().name())
+        .rebase(ri);
+  }
+
+  @Test
+  public void rebaseAbandonedChange() throws Exception {
+    PushOneCommit.Result r = createChange();
+    String changeId = r.getChangeId();
+    assertThat(info(changeId).status).isEqualTo(ChangeStatus.NEW);
+    gApi.changes()
+        .id(changeId)
+        .abandon();
+    ChangeInfo info = get(changeId);
+    assertThat(info.status).isEqualTo(ChangeStatus.ABANDONED);
+
+    exception.expect(ResourceConflictException.class);
+    exception.expectMessage("change is abandoned");
+    gApi.changes()
+        .id(changeId)
+        .revision(r.getCommit().name())
+        .rebase();
+  }
+
+  @Test
+  public void rebaseOntoAbandonedChange() throws Exception {
+    // Create two changes both with the same parent
+    PushOneCommit.Result r = createChange();
+    testRepo.reset("HEAD~1");
+    PushOneCommit.Result r2 = createChange();
+
+    // Abandon the first change
+    String changeId = r.getChangeId();
+    assertThat(info(changeId).status).isEqualTo(ChangeStatus.NEW);
+    gApi.changes()
+        .id(changeId)
+        .abandon();
+    ChangeInfo info = get(changeId);
+    assertThat(info.status).isEqualTo(ChangeStatus.ABANDONED);
+
+    RebaseInput ri = new RebaseInput();
+    ri.base = r.getCommit().name();
+
+    exception.expect(ResourceConflictException.class);
+    exception.expectMessage("base change is abandoned: " + changeId);
+    gApi.changes()
+        .id(r2.getChangeId())
+        .revision(r2.getCommit().name())
+        .rebase(ri);
+  }
+
+  @Test
+  public void rebaseOntoSelf() throws Exception {
+    PushOneCommit.Result r = createChange();
+    String changeId = r.getChangeId();
+    String commit = r.getCommit().name();
+    RebaseInput ri = new RebaseInput();
+    ri.base = commit;
+    exception.expect(ResourceConflictException.class);
+    exception.expectMessage("cannot rebase change onto itself");
+    gApi.changes()
+        .id(changeId)
+        .revision(commit)
         .rebase(ri);
   }
 

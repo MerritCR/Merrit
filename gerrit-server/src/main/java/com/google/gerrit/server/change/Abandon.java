@@ -31,7 +31,7 @@ import com.google.gerrit.reviewdb.client.PatchSet;
 import com.google.gerrit.reviewdb.server.ReviewDb;
 import com.google.gerrit.server.ChangeMessagesUtil;
 import com.google.gerrit.server.ChangeUtil;
-import com.google.gerrit.server.IdentifiedUser;
+import com.google.gerrit.server.CurrentUser;
 import com.google.gerrit.server.PatchSetUtil;
 import com.google.gerrit.server.git.BatchUpdate;
 import com.google.gerrit.server.git.BatchUpdate.ChangeContext;
@@ -80,25 +80,25 @@ public class Abandon implements RestModifyView<ChangeResource, AbandonInput>,
   }
 
   @Override
-  public ChangeInfo apply(ChangeResource req,
-      final AbandonInput input)
+  public ChangeInfo apply(ChangeResource req, AbandonInput input)
       throws RestApiException, UpdateException, OrmException {
     ChangeControl control = req.getControl();
-    IdentifiedUser caller = control.getUser().asIdentifiedUser();
     if (!control.canAbandon(dbProvider.get())) {
       throw new AuthException("abandon not permitted");
     }
-    Change change = abandon(control, input.message, caller.getAccount());
+    Change change = abandon(control, input.message);
     return json.create(ChangeJson.NO_OPTIONS).format(change);
   }
 
-  public Change abandon(ChangeControl control,
-      final String msgTxt, final Account account)
+  public Change abandon(ChangeControl control, String msgTxt)
       throws RestApiException, UpdateException {
+    CurrentUser user = control.getUser();
+    Account account = user.isIdentifiedUser()
+        ? user.asIdentifiedUser().getAccount()
+        : null;
     Op op = new Op(msgTxt, account);
     try (BatchUpdate u = batchUpdateFactory.create(dbProvider.get(),
-        control.getProject().getNameKey(), control.getUser(),
-        TimeUtil.nowTs())) {
+        control.getProject().getNameKey(), user, TimeUtil.nowTs())) {
       u.addOp(control.getId(), op).execute();
     }
     return op.change;
@@ -135,12 +135,12 @@ public class Abandon implements RestModifyView<ChangeResource, AbandonInput>,
       ctx.saveChange();
 
       update.setStatus(change.getStatus());
-      message = newMessage(ctx.getDb());
+      message = newMessage(ctx);
       cmUtil.addChangeMessage(ctx.getDb(), update, message);
       return true;
     }
 
-    private ChangeMessage newMessage(ReviewDb db) throws OrmException {
+    private ChangeMessage newMessage(ChangeContext ctx) throws OrmException {
       StringBuilder msg = new StringBuilder();
       msg.append("Abandoned");
       if (!Strings.nullToEmpty(msgTxt).trim().isEmpty()) {
@@ -151,9 +151,9 @@ public class Abandon implements RestModifyView<ChangeResource, AbandonInput>,
       ChangeMessage message = new ChangeMessage(
           new ChangeMessage.Key(
               change.getId(),
-              ChangeUtil.messageUUID(db)),
+              ChangeUtil.messageUUID(ctx.getDb())),
           account != null ? account.getId() : null,
-          change.getLastUpdatedOn(),
+          ctx.getWhen(),
           change.currentPatchSetId());
       message.setMessage(msg.toString());
       return message;

@@ -130,7 +130,7 @@ public class Rebase implements RestModifyView<RevisionResource, RebaseInput>,
 
   private String findBaseRev(RevWalk rw, RevisionResource rsrc,
       RebaseInput input) throws AuthException, ResourceConflictException,
-      OrmException, IOException {
+      OrmException, IOException, NoSuchChangeException {
     if (input == null || input.base == null) {
       return null;
     }
@@ -152,7 +152,7 @@ public class Rebase implements RestModifyView<RevisionResource, RebaseInput>,
     if (!base.control().isPatchVisible(base.patchSet(), db)) {
       throw new AuthException("base revision not accessible: " + str);
     } else if (change.getId().equals(baseId.getParentKey())) {
-      throw new ResourceConflictException("cannot depend on self");
+      throw new ResourceConflictException("cannot rebase change onto itself");
     }
 
     Change baseChange = base.control().getChange();
@@ -168,7 +168,7 @@ public class Rebase implements RestModifyView<RevisionResource, RebaseInput>,
     } else if (isMergedInto(rw, rsrc.getPatchSet(), base.patchSet())) {
       throw new ResourceConflictException(
           "base change " + baseChange.getKey()
-          + " is a descendant of the current  change - recursion not allowed");
+          + " is a descendant of the current change - recursion not allowed");
     }
     return base.patchSet().getRevision().get();
   }
@@ -194,7 +194,7 @@ public class Rebase implements RestModifyView<RevisionResource, RebaseInput>,
   }
 
   private Base parseBase(RevisionResource rsrc, String base)
-      throws OrmException {
+      throws OrmException, NoSuchChangeException {
     ReviewDb db = dbProvider.get();
 
     // Try parsing the base as a ref string.
@@ -237,12 +237,12 @@ public class Rebase implements RestModifyView<RevisionResource, RebaseInput>,
   }
 
   private ChangeControl controlFor(RevisionResource rsrc, Change.Id id)
-      throws OrmException {
+      throws OrmException, NoSuchChangeException {
     if (rsrc.getChange().getId().equals(id)) {
       return rsrc.getControl();
     }
     ChangeNotes notes =
-        notesFactory.create(dbProvider.get(), rsrc.getProject(), id);
+        notesFactory.createChecked(dbProvider.get(), rsrc.getProject(), id);
     return rsrc.getControl().getProjectControl().controlFor(notes);
   }
 

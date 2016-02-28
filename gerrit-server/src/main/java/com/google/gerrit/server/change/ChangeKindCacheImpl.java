@@ -110,7 +110,8 @@ public class ChangeKindCacheImpl implements ChangeKindCache {
     }
 
     @Override
-    public ChangeKind getChangeKind(ReviewDb db, Change change, PatchSet patch) {
+    public ChangeKind getChangeKind(ReviewDb db, Change change,
+        PatchSet patch) {
       return getChangeKindInternal(this, db, change, patch, changeDataFactory,
           projectCache, repoManager);
     }

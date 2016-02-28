@@ -52,6 +52,7 @@ import com.google.gerrit.reviewdb.server.ReviewDb;
 import com.google.gerrit.server.ChangeMessagesUtil;
 import com.google.gerrit.server.ChangeUtil;
 import com.google.gerrit.server.IdentifiedUser;
+import com.google.gerrit.server.InternalUser;
 import com.google.gerrit.server.git.BatchUpdate.ChangeContext;
 import com.google.gerrit.server.git.CodeReviewCommit.CodeReviewRevWalk;
 import com.google.gerrit.server.git.strategy.SubmitStrategy;
@@ -309,7 +310,7 @@ public class MergeOp implements AutoCloseable {
   private final ChangeMessagesUtil cmUtil;
   private final BatchUpdate.Factory batchUpdateFactory;
   private final GitRepositoryManager repoManager;
-  private final IdentifiedUser.GenericFactory identifiedUserFactory;
+  private final InternalUser.Factory internalUserFactory;
   private final MergeSuperSet mergeSuperSet;
   private final MergeValidators.Factory mergeValidatorsFactory;
   private final ProjectCache projectCache;
@@ -341,7 +342,7 @@ public class MergeOp implements AutoCloseable {
   MergeOp(ChangeMessagesUtil cmUtil,
       BatchUpdate.Factory batchUpdateFactory,
       GitRepositoryManager repoManager,
-      IdentifiedUser.GenericFactory identifiedUserFactory,
+      InternalUser.Factory internalUserFactory,
       MergeSuperSet mergeSuperSet,
       MergeValidators.Factory mergeValidatorsFactory,
       ProjectCache projectCache,
@@ -351,7 +352,7 @@ public class MergeOp implements AutoCloseable {
     this.cmUtil = cmUtil;
     this.batchUpdateFactory = batchUpdateFactory;
     this.repoManager = repoManager;
-    this.identifiedUserFactory = identifiedUserFactory;
+    this.internalUserFactory = internalUserFactory;
     this.mergeSuperSet = mergeSuperSet;
     this.mergeValidatorsFactory = mergeValidatorsFactory;
     this.projectCache = projectCache;
@@ -564,8 +565,8 @@ public class MergeOp implements AutoCloseable {
       try {
         integrateIntoHistory(cs);
       } catch (IntegrationException e) {
-        logError("Merge Conflict", e);
-        throw new ResourceConflictException("Merge Conflict", e);
+        logError("Error from integrateIntoHistory", e);
+        throw new ResourceConflictException(e.getMessage(), e);
       }
     } catch (IOException e) {
       // Anything before the merge attempt is an error
@@ -592,47 +593,68 @@ public class MergeOp implements AutoCloseable {
     logDebug("Beginning merge attempt on {}", cs);
     Map<Branch.NameKey, BranchBatch> toSubmit = new HashMap<>();
     logDebug("Perform the merges");
+
+    Multimap<Project.NameKey, Branch.NameKey> br;
+    Multimap<Branch.NameKey, ChangeData> cbb;
     try {
-      Multimap<Project.NameKey, Branch.NameKey> br = cs.branchesByProject();
-      Multimap<Branch.NameKey, ChangeData> cbb = cs.changesByBranch();
-      Set<Project.NameKey> projects = br.keySet();
-      Collection<Branch.NameKey> branches = cbb.keySet();
-      openRepos(projects);
-      for (Branch.NameKey branch : branches) {
-        OpenRepo or = getRepo(branch.getParentKey());
-        toSubmit.put(branch, validateChangeList(or, cbb.get(branch)));
-      }
-      failFast(cs); // Done checks that don't involve running submit strategies.
+      br = cs.branchesByProject();
+      cbb = cs.changesByBranch();
+    } catch (OrmException e) {
+      throw new IntegrationException("Error reading changes to submit", e);
+    }
+    Set<Project.NameKey> projects = br.keySet();
+    Collection<Branch.NameKey> branches = cbb.keySet();
+    openRepos(projects);
 
-      List<SubmitStrategy> strategies = new ArrayList<>(branches.size());
-      for (Branch.NameKey branch : branches) {
-        OpenRepo or = getRepo(branch.getParentKey());
-        OpenBranch ob = or.getBranch(branch);
-        BranchBatch submitting = toSubmit.get(branch);
-        checkNotNull(submitting.submitType(),
-            "null submit type for %s; expected to previously fail fast",
-            submitting);
-        Set<CodeReviewCommit> commitsToSubmit = commits(submitting.changes());
-        ob.mergeTip = new MergeTip(ob.oldTip, commitsToSubmit);
-        SubmitStrategy strategy = createStrategy(or, ob.mergeTip, branch,
-            submitting.submitType(), ob.oldTip);
-        strategies.add(strategy);
-        strategy.addOps(or.getUpdate(), commitsToSubmit);
-      }
+    for (Branch.NameKey branch : branches) {
+      OpenRepo or = getRepo(branch.getParentKey());
+      toSubmit.put(branch, validateChangeList(or, cbb.get(branch)));
+    }
+    failFast(cs); // Done checks that don't involve running submit strategies.
 
+    List<SubmitStrategy> strategies = new ArrayList<>(branches.size());
+    for (Branch.NameKey branch : branches) {
+      OpenRepo or = getRepo(branch.getParentKey());
+      OpenBranch ob = or.getBranch(branch);
+      BranchBatch submitting = toSubmit.get(branch);
+      checkNotNull(submitting.submitType(),
+          "null submit type for %s; expected to previously fail fast",
+          submitting);
+      Set<CodeReviewCommit> commitsToSubmit = commits(submitting.changes());
+      ob.mergeTip = new MergeTip(ob.oldTip, commitsToSubmit);
+      SubmitStrategy strategy = createStrategy(or, ob.mergeTip, branch,
+          submitting.submitType(), ob.oldTip);
+      strategies.add(strategy);
+      strategy.addOps(or.getUpdate(), commitsToSubmit);
+    }
+
+    try {
       BatchUpdate.execute(
           batchUpdates(projects),
           new SubmitStrategyListener(submitInput, strategies, commits));
-
-      SubmoduleOp subOp = subOpProvider.get();
-      for (Branch.NameKey branch : branches) {
-        OpenBranch ob = getRepo(branch.getParentKey()).getBranch(branch);
-        updateSubmoduleSubscriptions(ob, subOp);
+    } catch (UpdateException e) {
+      // BatchUpdate may have inadvertently wrapped an IntegrationException
+      // thrown by some legacy SubmitStrategyOp code that intended the error
+      // message to be user-visible. Copy the message from the wrapped
+      // exception.
+      //
+      // If you happen across one of these, the correct fix is to convert the
+      // inner IntegrationException to a ResourceConflictException.
+      String msg;
+      if (e.getCause() instanceof IntegrationException) {
+        msg = e.getCause().getMessage();
+      } else {
+        msg = "Error submitting change" + (cs.size() != 1 ? "s" : "");
       }
-      updateSuperProjects(subOp, br.values());
-    } catch (UpdateException | OrmException e) {
-      throw new IntegrationException("Error submitting changes", e);
+      throw new IntegrationException(msg, e);
     }
+
+    SubmoduleOp subOp = subOpProvider.get();
+    for (Branch.NameKey branch : branches) {
+      OpenBranch ob = getRepo(branch.getParentKey()).getBranch(branch);
+      updateSubmoduleSubscriptions(ob, subOp);
+    }
+    updateSuperProjects(subOp, br.values());
   }
 
   private List<BatchUpdate> batchUpdates(Collection<Project.NameKey> projects) {
@@ -643,13 +665,13 @@ public class MergeOp implements AutoCloseable {
     return updates;
   }
 
-  private Set<CodeReviewCommit> commits(List<ChangeData> cds) throws OrmException {
+  private Set<CodeReviewCommit> commits(List<ChangeData> cds) {
     LinkedHashSet<CodeReviewCommit> result =
         Sets.newLinkedHashSetWithExpectedSize(cds.size());
     for (ChangeData cd : cds) {
       CodeReviewCommit commit = commits.get(cd.getId());
       checkState(commit != null,
-          "commit for %s not found by validateChangeList", cd.change().getId());
+          "commit for %s not found by validateChangeList", cd.getId());
       result.add(commit);
     }
     return result;
@@ -877,10 +899,8 @@ public class MergeOp implements AutoCloseable {
       Project.NameKey destProject) {
     try {
       for (ChangeData cd : internalChangeQuery.byProjectOpen(destProject)) {
-        //TODO: Use InternalUser instead of change owner
         try (BatchUpdate bu = batchUpdateFactory.create(db, destProject,
-            identifiedUserFactory.create(cd.change().getOwner()),
-            TimeUtil.nowTs())) {
+            internalUserFactory.create(), TimeUtil.nowTs())) {
           bu.addOp(cd.getId(), new BatchUpdate.Op() {
             @Override
             public boolean updateChange(ChangeContext ctx) throws OrmException {

@@ -32,12 +32,10 @@ import com.google.gerrit.extensions.common.LabelInfo;
 import com.google.gerrit.extensions.restapi.ResourceNotFoundException;
 import com.google.gerrit.reviewdb.client.PatchSet;
 import com.google.gerrit.testutil.ConfigSuite;
-import com.google.gwtorm.server.OrmException;
 
 import org.eclipse.jgit.lib.Config;
 import org.junit.Test;
 
-import java.io.IOException;
 import java.util.Collection;
 
 public class DraftChangeIT extends AbstractDaemonTest {
@@ -147,21 +145,16 @@ public class DraftChangeIT extends AbstractDaemonTest {
     assertThat(label.all.get(0).value).isEqualTo(1);
   }
 
-  private PushOneCommit.Result createDraftChange() throws Exception {
-    return pushTo("refs/drafts/master");
-  }
-
   private static RestResponse deleteChange(String changeId,
-      RestSession s) throws IOException {
+      RestSession s) throws Exception {
     return s.delete("/changes/" + changeId);
   }
 
-  private RestResponse publishChange(String changeId) throws IOException {
+  private RestResponse publishChange(String changeId) throws Exception {
     return adminSession.post("/changes/" + changeId + "/publish");
   }
 
-  private RestResponse publishPatchSet(String changeId) throws IOException,
-      OrmException {
+  private RestResponse publishPatchSet(String changeId) throws Exception {
     PatchSet patchSet = Iterables.getOnlyElement(
         queryProvider.get().byKeyPrefix(changeId)).currentPatchSet();
     return adminSession.post("/changes/"

@@ -21,6 +21,7 @@ limitations under the License.
 <link rel="import" href="gr-ajax.html">
 <link rel="import" href="gr-button.html">
 <link rel="import" href="gr-change-actions.html">
+<link rel="import" href="gr-change-metadata.html">
 <link rel="import" href="gr-change-star.html">
 <link rel="import" href="gr-date-formatter.html">
 <link rel="import" href="gr-download-dialog.html">
@@ -29,8 +30,7 @@ limitations under the License.
 <link rel="import" href="gr-messages-list.html">
 <link rel="import" href="gr-overlay.html">
 <link rel="import" href="gr-related-changes-list.html">
-<link rel="import" href="gr-reply-dropdown.html">
-<link rel="import" href="gr-reviewer-list.html">
+<link rel="import" href="gr-reply-dialog.html">
 
 <dom-module id="gr-change-view">
   <template>
@@ -83,8 +83,11 @@ limitations under the License.
       .header select {
         margin-left: .5em;
       }
-      .header gr-reply-dropdown {
+      .header .reply {
         margin-left: var(--default-horizontal-margin);
+      }
+      gr-reply-dialog {
+        width: 30em;
       }
       .changeStatus {
         color: #999;
@@ -103,32 +106,12 @@ limitations under the License.
         padding-top: 0;
       }
       .changeInfo-column:not(:last-of-type) {
-        margin-right: 2em;
+        margin-right: 1em;
+        padding-right: 1em;
       }
-      table {
-        border-collapse: collapse;
-      }
-      td {
-        padding: 2px 5px 2px 0;
-        vertical-align: top;
-      }
-      .changeMetadata-label {
-        font-weight: bold;
-      }
-      .labelValue:not(:first-of-type) {
-        margin-top: .25em;
-      }
-      .labelValue .approved,
-      .labelValue .notApproved {
-        display: inline-block;
-        padding: .1em .3em;
-        border-radius: 3px;
-      }
-      .approved {
-        background-color: #d4ffd4;
-      }
-      .notApproved {
-        background-color: #ffd4d4;
+      .changeMetadata {
+        border-right: 1px solid #ddd;
+        font-size: .9em;
       }
       gr-change-actions {
         margin-top: 1em;
@@ -136,29 +119,25 @@ limitations under the License.
       .commitMessage {
         font-family: var(--monospace-font-family);
         flex: 0 0 72ch;
+        margin-right: 2em;
+        margin-bottom: 1em;
       }
       .commitMessage h4 {
         font-family: var(--font-family);
         font-weight: bold;
         margin-bottom: .25em;
       }
+      .commitAndRelated {
+        align-content: flex-start;
+        display: flex;
+        flex: 1;
+        flex-wrap: wrap;
+      }
       gr-file-list {
         margin-bottom: 1em;
         padding: 0 var(--default-horizontal-margin);
       }
-      @media screen and (max-width: 80em) {
-        .changeInfo {
-          flex-wrap: wrap;
-        }
-        .changeInfo-column,
-        .changeInfo-column:not(:last-of-type) {
-          margin-right: 0;
-        }
-        .changeInfo-column:not(:first-of-type) {
-          margin-top: .5em;
-        }
-      }
-      @media screen and (max-width: 60em) {
+      @media screen and (max-width: 50em) {
         .container {
           margin: .5em 0 !important;
         }
@@ -171,7 +150,7 @@ limitations under the License.
         .header {
           align-items: flex-start;
           flex-direction: column;
-          padding: .5em 1.25rem !important;
+          padding: .5em var(--default-horizontal-margin) !important;
         }
         gr-change-star {
           vertical-align: middle;
@@ -190,6 +169,9 @@ limitations under the License.
           justify-content: space-between;
           margin-top: .5em;
         }
+        gr-reply-dialog {
+          width: 90vw;
+        }
         .download {
           display: none;
         }
@@ -201,16 +183,29 @@ limitations under the License.
           margin-left: 0 !important;
           margin-right: .5em;
         }
-        .header gr-reply-dropdown {
+        .header .reply {
           margin-left: 0 !important;
           margin-right: .5em;
         }
-        .changeInfo {
+        .changeInfo-column:not(:last-of-type) {
+          margin-right: 0;
+          padding-right: 0;
+        }
+        .changeInfo,
+        .commitAndRelated {
           flex-direction: column;
           flex-wrap: nowrap;
         }
+        .changeMetadata {
+          font-size: 1em;
+          border-right: none;
+          margin-bottom: 1em;
+          margin-top: .25em;
+          max-width: none;
+        }
         .commitMessage {
           flex: initial;
+          margin-right: 0;
         }
       }
     </style>
@@ -241,13 +236,7 @@ limitations under the License.
             <span class="changeStatus">[[_computeChangeStatus(_change, _patchNum)]]</span>
           </span>
           <span class="header-actions">
-            <gr-reply-dropdown id="replyDropdown"
-                change-num="[[_changeNum]]"
-                patch-num="[[_patchNum]]"
-                labels="[[_change.labels]]"
-                permitted-labels="[[_change.permitted_labels]]"
-                on-send="_handleReplySent"
-                hidden$="[[!_loggedIn]]">Reply</gr-reply-dropdown>
+            <gr-button class="reply" hidden$="[[!_loggedIn]]" hidden on-tap="_handleReplyTap">Reply</gr-button>
             <gr-button link class="download" on-tap="_handleDownloadTap">Download</gr-button>
             <span>
               <label class="patchSelectLabel" for="patchSetSelect">Patch set</label>
@@ -266,81 +255,28 @@ limitations under the License.
       </div>
       <section class="changeInfo">
         <div class="changeInfo-column changeMetadata">
-          <table>
-            <tr>
-              <td class="changeMetadata-label">Owner</td>
-              <td>
-                <gr-account-link account="[[_change.owner]]"></gr-account-link>
-              </td>
-            </tr>
-            <tr>
-              <td class="changeMetadata-label">Reviewers</td>
-              <td>
-                <gr-reviewer-list
-                    change="[[_change]]"
-                    mutable="[[_loggedIn]]"
-                    suggest-from="[[serverConfig.suggest.from]]"></gr-reviewer-list>
-              </td>
-            </tr>
-            <tr>
-              <td class="changeMetadata-label">Project</td>
-              <td>[[_change.project]]</td>
-            </tr>
-            <tr>
-              <td class="changeMetadata-label">Branch</td>
-              <td>[[_change.branch]]</td>
-            </tr>
-            <tr>
-              <td class="changeMetadata-label">Topic</td>
-              <td>[[_change.topic]]</td>
-            </tr>
-            <tr>
-              <td class="changeMetadata-label">Strategy</td>
-              <td></td>
-            </tr>
-            <tr>
-              <td class="changeMetadata-label">Updated</td>
-              <td>
-                <gr-date-formatter
-                    date-str="[[_change.updated]]"></gr-date-formatter>
-              </td>
-            </tr>
-            <template is="dom-repeat"
-                items="[[_computeLabelNames(_change.labels)]]" as="labelName">
-              <tr>
-                <td class="changeMetadata-label">[[labelName]]</td>
-                <td>
-                  <template is="dom-repeat"
-                      items="[[_computeLabelValues(labelName, _change.labels)]]"
-                      as="label">
-                    <div class="labelValue">
-                      <span class$="[[label.className]]">
-                        <span>[[label.value]]</span>
-                        <gr-account-link account="[[label.account]]"></gr-account-link>
-                      </span>
-                    </div>
-                  </template>
-                </td>
-              </tr>
-            </template>
-          </table>
+          <gr-change-metadata
+              change="[[_change]]"
+              mutable="[[_loggedIn]]"></gr-change-metadata>
           <gr-change-actions id="actions"
               actions="[[_change.actions]]"
               change-num="[[_changeNum]]"
               patch-num="[[_patchNum]]"
               on-reload-change="_handleReloadChange"></gr-change-actions>
         </div>
-        <div class="changeInfo-column commitMessage">
-          <h4>Commit message</h4>
-          <gr-linked-text pre
-              content="[[_commitInfo.message]]"
-              config="[[_projectConfig.commentlinks]]"></gr-linked-text>
-        </div>
-        <div class="changeInfo-column">
-          <gr-related-changes-list id="relatedChanges"
+        <div class="changeInfo-column commitAndRelated">
+          <div class="commitMessage">
+            <h4>Commit message</h4>
+            <gr-linked-text pre
+                content="[[_commitInfo.message]]"
+                config="[[_projectConfig.commentlinks]]"></gr-linked-text>
+          </div>
+          <div class="relatedChanges">
+            <gr-related-changes-list id="relatedChanges"
               change="[[_change]]"
               server-config="[[serverConfig]]"
               patch-num="[[_patchNum]]"></gr-related-changes-list>
+          </div>
         </div>
       </section>
       <gr-file-list id="fileList"
@@ -362,6 +298,18 @@ limitations under the License.
           patch-num="[[_patchNum]]"
           config="[[serverConfig.download]]"
           on-close="_handleDownloadDialogClose"></gr-download-dialog>
+    </gr-overlay>
+    <gr-overlay id="replyOverlay"
+        on-iron-overlay-opened="_handleReplyOverlayOpen"
+        with-backdrop>
+      <gr-reply-dialog id="replyDialog"
+          change-num="[[_changeNum]]"
+          patch-num="[[_patchNum]]"
+          labels="[[_change.labels]]"
+          permitted-labels="[[_change.permitted_labels]]"
+          on-send="_handleReplySent"
+          on-cancel="_handleReplyCancel"
+          hidden$="[[!_loggedIn]]">Reply</gr-reply-dialog>
     </gr-overlay>
   </template>
   <script>
@@ -476,6 +424,11 @@ limitations under the License.
         page.show(this._computeChangePath(this._changeNum) + '/' + patchNum);
       },
 
+      _handleReplyTap: function(e) {
+        e.preventDefault();
+        this.$.replyOverlay.open();
+      },
+
       _handleDownloadTap: function(e) {
         e.preventDefault();
         this.$.downloadOverlay.open();
@@ -489,12 +442,22 @@ limitations under the License.
         var msg = e.detail.message.message;
         var quoteStr = msg.split('\n').map(
             function(line) { return '> ' + line; }).join('\n') + '\n\n';
-        this.$.replyDropdown.draft += quoteStr;
-        this.$.replyDropdown.open();
+        this.$.replyDialog.draft += quoteStr;
+        this.$.replyOverlay.open();
+      },
+
+      _handleReplyOverlayOpen: function(e) {
+        this.$.replyDialog.reload();
+        this.$.replyDialog.focus();
       },
 
       _handleReplySent: function(e) {
+        this.$.replyOverlay.close();
         this._reload();
+      },
+
+      _handleReplyCancel: function(e) {
+        this.$.replyOverlay.close();
       },
 
       _paramsChanged: function(value) {
@@ -526,9 +489,9 @@ limitations under the License.
           app.accountReady.then(function() {
             if (!this._loggedIn) { return; }
 
-            if (this.viewState.showReplyDropdown) {
-              this.$.replyDropdown.open();
-              this.set('viewState.showReplyDropdown', false);
+            if (this.viewState.showReplyDialog) {
+              this.$.replyOverlay.open();
+              this.set('viewState.showReplyDialog', false);
             }
           }.bind(this));
         }.bind(this));
@@ -648,7 +611,7 @@ limitations under the License.
         switch (e.keyCode) {
           case 65:  // 'a'
             e.preventDefault();
-            this.$.replyDropdown.open();
+            this.$.replyOverlay.open();
             break;
           case 85:  // 'u'
             e.preventDefault();

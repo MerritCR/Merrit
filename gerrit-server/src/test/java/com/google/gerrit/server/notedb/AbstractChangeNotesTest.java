@@ -29,8 +29,10 @@ import com.google.gerrit.reviewdb.client.PatchLineComment;
 import com.google.gerrit.reviewdb.client.PatchSet;
 import com.google.gerrit.reviewdb.client.Project;
 import com.google.gerrit.reviewdb.client.RevId;
+import com.google.gerrit.server.CurrentUser;
 import com.google.gerrit.server.GerritPersonIdent;
 import com.google.gerrit.server.IdentifiedUser;
+import com.google.gerrit.server.InternalUser;
 import com.google.gerrit.server.StarredChangesUtil;
 import com.google.gerrit.server.account.AccountCache;
 import com.google.gerrit.server.account.CapabilityControl;
@@ -67,15 +69,16 @@ import org.eclipse.jgit.internal.storage.dfs.InMemoryRepository;
 import org.eclipse.jgit.junit.TestRepository;
 import org.eclipse.jgit.lib.Config;
 import org.eclipse.jgit.lib.PersonIdent;
-import org.eclipse.jgit.lib.Repository;
 import org.eclipse.jgit.revwalk.RevWalk;
 import org.junit.After;
 import org.junit.Before;
+import org.junit.Ignore;
 
 import java.sql.Timestamp;
 import java.util.TimeZone;
 
-public class AbstractChangeNotesTest extends GerritBaseTests {
+@Ignore
+public abstract class AbstractChangeNotesTest extends GerritBaseTests {
   private static final TimeZone TZ =
       TimeZone.getTimeZone("America/Los_Angeles");
 
@@ -89,16 +92,22 @@ public class AbstractChangeNotesTest extends GerritBaseTests {
   protected InMemoryRepository repo;
   protected InMemoryRepositoryManager repoManager;
   protected PersonIdent serverIdent;
+  protected InternalUser internalUser;
   protected Project.NameKey project;
   protected RevWalk rw;
   protected TestRepository<InMemoryRepository> tr;
 
-  @Inject protected IdentifiedUser.GenericFactory userFactory;
+  @Inject
+  protected IdentifiedUser.GenericFactory userFactory;
+
+  @Inject
+  protected NoteDbUpdateManager.Factory updateManagerFactory;
+
+  @Inject
+  protected AllUsersName allUsers;
 
   private Injector injector;
   private String systemTimeZone;
-
-  @Inject private AllUsersName allUsers;
 
   @Before
   public void setUp() throws Exception {
@@ -126,6 +135,7 @@ public class AbstractChangeNotesTest extends GerritBaseTests {
       @Override
       public void configure() {
         install(new GitModule());
+        factory(NoteDbUpdateManager.Factory.class);
         bind(AllUsersName.class).toProvider(AllUsersNameProvider.class);
         bind(NotesMigration.class).toInstance(MIGRATION);
         bind(GitRepositoryManager.class).toInstance(repoManager);
@@ -157,6 +167,7 @@ public class AbstractChangeNotesTest extends GerritBaseTests {
     changeOwner = userFactory.create(co.getId());
     otherUser = userFactory.create(ou.getId());
     otherUserId = otherUser.getAccountId();
+    internalUser = new InternalUser(null);
   }
 
   private void setTimeForTesting() {
@@ -179,13 +190,10 @@ public class AbstractChangeNotesTest extends GerritBaseTests {
     return c;
   }
 
-  protected ChangeUpdate newUpdate(Change c, IdentifiedUser user)
+  protected ChangeUpdate newUpdate(Change c, CurrentUser user)
       throws Exception {
     ChangeUpdate update = TestChanges.newUpdate(
         injector, repoManager, MIGRATION, c, allUsers, user);
-    try (Repository repo = repoManager.openMetadataRepository(c.getProject())) {
-      update.load(repo);
-    }
     return update;
   }
 

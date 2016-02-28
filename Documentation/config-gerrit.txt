@@ -383,6 +383,12 @@ Sets "path" attribute of the authentication cookie.
 +
 If not set, HTTP request's path is used.
 
+[[auth.cookieDomain]]auth.cookieDomain::
++
+Sets "domain" attribute of the authentication cookie.
++
+If not set, HTTP request's domain is used.
+
 [[auth.cookieSecure]]auth.cookieSecure::
 +
 Sets "secure" flag of the authentication cookie.  If true, cookies
@@ -524,9 +530,29 @@ future lookup.  This local disk cache is used to retain potentially
 expensive to compute information across restarts.  If the location
 does not exist, Gerrit will try to create it.
 +
+Tehnically, cached entities are persisted as a set of H2 databases
+inside this directory.
++
 If not absolute, the path is resolved relative to `$site_path`.
 +
 Default is unset, no disk cache.
+
+[[cache.h2CacheSize]]cache.h2CacheSize::
++
+The size of the H2 database cache, in bytes, used for each persistent cache.
++
+Some caches of Gerrit are persistent and are backed by an H2 database.
+H2 uses memory to cache its database content. The parameter `h2CacheSize`
+allows to limit the memory used by H2 and thus prevent out-of-memory
+caused by the H2 database using too much memory.
++
+Technically the H2 cache size is configured using the CACHE_SIZE parameter in
+the H2 JDBC connection URL, as described
+link:http://www.h2database.com/html/features.html#cache_settings[here]
++
+Default is unset, no cache size limit.
++
+Common unit suffixes of 'k', 'm', or 'g' are supported.
 
 [[cache.name.maxAge]]cache.<name>.maxAge::
 +
