@@ -16,6 +16,7 @@ limitations under the License.
 
 <link rel="import" href="../bower_components/polymer/polymer.html">
 <link rel="import" href="../behaviors/keyboard-shortcut-behavior.html">
+<link rel="import" href="../behaviors/rest-client-behavior.html">
 <link rel="import" href="../styles/gr-change-list-styles.html">
 <link rel="import" href="gr-change-list-item.html">
 
@@ -47,6 +48,9 @@ limitations under the License.
     <template is="dom-repeat" items="{{groups}}" as="changeGroup" index-as="groupIndex">
       <template is="dom-if" if="[[_groupTitle(groupIndex)]]">
         <div class="groupHeader">[[_groupTitle(groupIndex)]]</div>
+      </template>
+      <template is="dom-if" if="[[!changeGroup.length]]">
+        <div class="noChanges">No changes</div>
       </template>
       <template is="dom-repeat" items="[[changeGroup]]" as="change">
         <gr-change-list-item
@@ -115,6 +119,7 @@ limitations under the License.
 
       behaviors: [
         Gerrit.KeyboardShortcutBehavior,
+        Gerrit.RESTClientBehavior,
       ],
 
       _computeLabelNames: function(groups) {
@@ -158,7 +163,8 @@ limitations under the License.
       },
 
       _computeItemUnreviewed: function(change, showReviewedState) {
-        return showReviewedState && !change.reviewed;
+        return showReviewedState && !change.reviewed &&
+            change.status != this.ChangeStatus.MERGED;
       },
 
       _handleKey: function(e) {
