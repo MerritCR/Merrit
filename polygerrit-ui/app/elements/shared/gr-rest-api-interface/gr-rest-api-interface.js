@@ -20,6 +20,17 @@
   Polymer({
     is: 'gr-rest-api-interface',
 
+    properties: {
+      _cache: {
+        type: Object,
+        value: {},  // Intentional to share the object accross instances.
+      },
+      _sharedFetchPromises: {
+        type: Object,
+        value: {},  // Intentional to share the object accross instances.
+      },
+    },
+
     fetchJSON: function(url, opt_cancelCondition, opt_params, opt_opts) {
       opt_opts = opt_opts || {};
 
@@ -52,7 +63,13 @@
         }
 
         return response.text().then(function(text) {
-          return JSON.parse(text.substring(JSON_PREFIX.length));
+          var result;
+          try {
+            result = JSON.parse(text.substring(JSON_PREFIX.length));
+          } catch (_) {
+            result = null;
+          }
+          return result;
         });
       }).catch(function(err) {
         if (opt_opts.noCredentials) {
@@ -65,14 +82,51 @@
       }.bind(this));
     },
 
-    getAccountDetail: function() {
-      return this.fetchJSON('/accounts/self/detail');
+    getConfig: function() {
+      return this._fetchSharedCacheURL('/config/server/info');
+    },
+
+    getVersion: function() {
+      return this._fetchSharedCacheURL('/config/server/version');
+    },
+
+    getDiffPreferences: function() {
+      return this._fetchSharedCacheURL('/accounts/self/preferences.diff');
+    },
+
+    getAccount: function() {
+      return this._fetchSharedCacheURL('/accounts/self/detail');
+    },
+
+    getPreferences: function() {
+      return this._fetchSharedCacheURL('/accounts/self/preferences');
+    },
+
+    _fetchSharedCacheURL: function(url) {
+      if (this._sharedFetchPromises[url]) {
+        return this._sharedFetchPromises[url];
+      }
+      // TODO(andybons): Periodic cache invalidation.
+      if (this._cache[url] !== undefined) {
+        return Promise.resolve(this._cache[url]);
+      }
+      this._sharedFetchPromises[url] = this.fetchJSON(url).then(
+        function(response) {
+          if (response !== undefined) {
+            this._cache[url] = response;
+          }
+          this._sharedFetchPromises[url] = undefined;
+          return response;
+        }.bind(this)).catch(function(err) {
+          this._sharedFetchPromises[url] = undefined;
+          throw err;
+        }.bind(this));
+      return this._sharedFetchPromises[url];
     },
 
     getDiff: function(changeNum, basePatchNum, patchNum, path,
         opt_cancelCondition) {
-      var url = this._changeBaseURL(changeNum, patchNum) + '/files/' +
-          encodeURIComponent(path) + '/diff';
+      var url = this._getDiffFetchURL(changeNum, patchNum, path);
       var params =  {
         context: 'ALL',
         intraline: null
@@ -82,6 +136,11 @@
       }
 
       return this.fetchJSON(url, opt_cancelCondition, params);
+    },
+
+    _getDiffFetchURL: function(changeNum, patchNum, path) {
+      return this._changeBaseURL(changeNum, patchNum) + '/files/' +
+          encodeURIComponent(path) + '/diff';
     },
 
     getDiffComments: function(changeNum, basePatchNum, patchNum, path) {
@@ -102,7 +161,7 @@
       var promises = [];
       var comments;
       var baseComments;
-      var url = this._getDiffFetchURL(changeNum, patchNum, endpoint);
+      var url = this._getDiffCommentsFetchURL(changeNum, patchNum, endpoint);
       promises.push(this.fetchJSON(url).then(function(response) {
         comments = response[path] || [];
         if (basePatchNum == PARENT_PATCH_NUM) {
@@ -112,7 +171,8 @@
       }.bind(this)));
 
       if (basePatchNum != PARENT_PATCH_NUM) {
-        var baseURL = this._getDiffFetchURL(changeNum, basePatchNum, endpoint);
+        var baseURL = this._getDiffCommentsFetchURL(changeNum, basePatchNum,
+            endpoint);
         promises.push(this.fetchJSON(baseURL).then(function(response) {
           baseComments = (response[path] || []).filter(withoutParent);
         }));
@@ -126,7 +186,7 @@
       });
     },
 
-    _getDiffFetchURL: function(changeNum, patchNum, endpoint) {
+    _getDiffCommentsFetchURL: function(changeNum, patchNum, endpoint) {
       return this._changeBaseURL(changeNum, patchNum) + endpoint;
     },
 

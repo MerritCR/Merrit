@@ -24,6 +24,7 @@ import com.google.gerrit.common.data.LabelType;
 import com.google.gerrit.common.data.LabelTypes;
 import com.google.gerrit.extensions.events.LifecycleListener;
 import com.google.gerrit.extensions.events.NewProjectCreatedListener;
+import com.google.gerrit.extensions.registration.DynamicItem;
 import com.google.gerrit.extensions.registration.DynamicSet;
 import com.google.gerrit.lifecycle.LifecycleModule;
 import com.google.gerrit.reviewdb.client.Account;
@@ -32,7 +33,6 @@ import com.google.gerrit.reviewdb.client.Change;
 import com.google.gerrit.reviewdb.client.PatchSet;
 import com.google.gerrit.reviewdb.client.Project;
 import com.google.gerrit.reviewdb.server.ReviewDb;
-import com.google.gerrit.server.CurrentUser;
 import com.google.gerrit.server.account.AccountCache;
 import com.google.gerrit.server.account.AccountState;
 import com.google.gerrit.server.config.AnonymousCowardName;
@@ -44,7 +44,6 @@ import com.google.gerrit.server.data.ChangeAttribute;
 import com.google.gerrit.server.data.PatchSetAttribute;
 import com.google.gerrit.server.data.RefUpdateAttribute;
 import com.google.gerrit.server.events.ChangeAbandonedEvent;
-import com.google.gerrit.server.events.ChangeEvent;
 import com.google.gerrit.server.events.ChangeMergedEvent;
 import com.google.gerrit.server.events.ChangeRestoredEvent;
 import com.google.gerrit.server.events.CommentAddedEvent;
@@ -54,17 +53,12 @@ import com.google.gerrit.server.events.HashtagsChangedEvent;
 import com.google.gerrit.server.events.MergeFailedEvent;
 import com.google.gerrit.server.events.PatchSetCreatedEvent;
 import com.google.gerrit.server.events.ProjectCreatedEvent;
-import com.google.gerrit.server.events.ProjectEvent;
-import com.google.gerrit.server.events.RefEvent;
 import com.google.gerrit.server.events.RefUpdatedEvent;
 import com.google.gerrit.server.events.ReviewerAddedEvent;
 import com.google.gerrit.server.events.TopicChangedEvent;
 import com.google.gerrit.server.git.GitRepositoryManager;
 import com.google.gerrit.server.git.WorkQueue;
-import com.google.gerrit.server.notedb.ChangeNotes;
 import com.google.gerrit.server.project.ProjectCache;
-import com.google.gerrit.server.project.ProjectControl;
-import com.google.gerrit.server.project.ProjectState;
 import com.google.gwtorm.server.OrmException;
 import com.google.inject.Inject;
 import com.google.inject.Singleton;
@@ -92,7 +86,6 @@ import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Set;
 import java.util.concurrent.Callable;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.FutureTask;
@@ -101,8 +94,8 @@ import java.util.concurrent.TimeoutException;
 
 /** Spawns local executables when a hook action occurs. */
 @Singleton
-public class ChangeHookRunner implements ChangeHooks, EventDispatcher,
-  EventSource, LifecycleListener, NewProjectCreatedListener {
+public class ChangeHookRunner implements ChangeHooks, LifecycleListener,
+    NewProjectCreatedListener {
     /** A logger for this class. */
     private static final Logger log = LoggerFactory.getLogger(ChangeHookRunner.class);
 
@@ -111,20 +104,8 @@ public class ChangeHookRunner implements ChangeHooks, EventDispatcher,
       protected void configure() {
         bind(ChangeHookRunner.class);
         bind(ChangeHooks.class).to(ChangeHookRunner.class);
-        bind(EventDispatcher.class).to(ChangeHookRunner.class);
-        bind(EventSource.class).to(ChangeHookRunner.class);
         DynamicSet.bind(binder(), NewProjectCreatedListener.class).to(ChangeHookRunner.class);
         listener().to(ChangeHookRunner.class);
-      }
-    }
-
-    private static class EventListenerHolder {
-      final EventListener listener;
-      final CurrentUser user;
-
-      EventListenerHolder(EventListener l, CurrentUser u) {
-        listener = l;
-        user = u;
       }
     }
 
@@ -175,14 +156,6 @@ public class ChangeHookRunner implements ChangeHooks, EventDispatcher,
         return sb.toString();
       }
     }
-
-    /** Listeners to receive changes as they happen (limited by visibility
-     *  of holder's user). */
-    private final Map<EventListener, EventListenerHolder> listeners =
-        new ConcurrentHashMap<>();
-
-    /** Listeners to receive all changes as they happen. */
-    private final DynamicSet<EventListener> unrestrictedListeners;
 
     /** Path of the new patchset hook. */
     private final Optional<Path> patchsetCreatedHook;
@@ -248,7 +221,7 @@ public class ChangeHookRunner implements ChangeHooks, EventDispatcher,
     /** Timeout value for synchronous hooks */
     private final int syncHookTimeout;
 
-    private final ChangeNotes.Factory notesFactory;
+    private DynamicItem<EventDispatcher> dispatcher;
 
     /**
      * Create a new ChangeHookRunner.
@@ -268,8 +241,7 @@ public class ChangeHookRunner implements ChangeHooks, EventDispatcher,
       ProjectCache projectCache,
       AccountCache accountCache,
       EventFactory eventFactory,
-      DynamicSet<EventListener> unrestrictedListeners,
-      ChangeNotes.Factory notesFactory) {
+      DynamicItem<EventDispatcher> dispatcher) {
         this.anonymousCowardName = anonymousCowardName;
         this.repoManager = repoManager;
         this.hookQueue = queue.createQueue(1, "hook");
@@ -277,8 +249,7 @@ public class ChangeHookRunner implements ChangeHooks, EventDispatcher,
         this.accountCache = accountCache;
         this.eventFactory = eventFactory;
         this.sitePaths = sitePath;
-        this.unrestrictedListeners = unrestrictedListeners;
-        this.notesFactory = notesFactory;
+        this.dispatcher = dispatcher;
 
         Path hooksPath;
         String hooksPathConfig = config.getString("hooks", null, "path");
@@ -317,16 +288,6 @@ public class ChangeHookRunner implements ChangeHooks, EventDispatcher,
       String value = config.getString("hooks", null, setting);
       Path p = path.resolve(value != null ? value : name);
       return Files.exists(p) ? Optional.of(p) : Optional.<Path>absent();
-    }
-
-    @Override
-    public void addEventListener(EventListener listener, CurrentUser user) {
-      listeners.put(listener, new EventListenerHolder(listener, user));
-    }
-
-    @Override
-    public void removeEventListener(EventListener listener) {
-      listeners.remove(listener);
     }
 
     /**
@@ -374,7 +335,7 @@ public class ChangeHookRunner implements ChangeHooks, EventDispatcher,
       event.projectName = project.get();
       event.headName = headName;
 
-      fireEvent(project, event);
+      dispatcher.get().postEvent(project, event);
 
       if (!projectCreatedHook.isPresent()) {
         return;
@@ -399,7 +360,7 @@ public class ChangeHookRunner implements ChangeHooks, EventDispatcher,
       event.patchSet = patchSetAttributeSupplier(change, patchSet);
       event.uploader = accountAttributeSupplier(uploader);
 
-      fireEvent(change, event, db);
+      dispatcher.get().postEvent(change, event, db);
 
       if (!patchsetCreatedHook.isPresent()) {
         return;
@@ -436,7 +397,7 @@ public class ChangeHookRunner implements ChangeHooks, EventDispatcher,
       event.patchSet = patchSetAttributeSupplier(change, patchSet);
       event.uploader = accountAttributeSupplier(uploader);
 
-      fireEvent(change, event, db);
+      dispatcher.get().postEvent(change, event, db);
 
       if (!draftPublishedHook.isPresent()) {
         return;
@@ -488,7 +449,7 @@ public class ChangeHookRunner implements ChangeHooks, EventDispatcher,
             }
           });
 
-      fireEvent(change, event, db);
+      dispatcher.get().postEvent(change, event, db);
 
       if (!commentAddedHook.isPresent()) {
         return;
@@ -532,7 +493,7 @@ public class ChangeHookRunner implements ChangeHooks, EventDispatcher,
       event.patchSet = patchSetAttributeSupplier(change, patchSet);
       event.newRev = mergeResultRev;
 
-      fireEvent(change, event, db);
+      dispatcher.get().postEvent(change, event, db);
 
       if (!changeMergedHook.isPresent()) {
         return;
@@ -567,7 +528,7 @@ public class ChangeHookRunner implements ChangeHooks, EventDispatcher,
       event.patchSet = patchSetAttributeSupplier(change, patchSet);
       event.reason = reason;
 
-      fireEvent(change, event, db);
+      dispatcher.get().postEvent(change, event, db);
 
       if (!mergeFailedHook.isPresent()) {
         return;
@@ -602,7 +563,7 @@ public class ChangeHookRunner implements ChangeHooks, EventDispatcher,
       event.patchSet = patchSetAttributeSupplier(change, patchSet);
       event.reason = reason;
 
-      fireEvent(change, event, db);
+      dispatcher.get().postEvent(change, event, db);
 
       if (!changeAbandonedHook.isPresent()) {
         return;
@@ -637,7 +598,7 @@ public class ChangeHookRunner implements ChangeHooks, EventDispatcher,
       event.patchSet = patchSetAttributeSupplier(change, patchSet);
       event.reason = reason;
 
-      fireEvent(change, event, db);
+      dispatcher.get().postEvent(change, event, db);
 
       if (!changeRestoredHook.isPresent()) {
         return;
@@ -683,7 +644,7 @@ public class ChangeHookRunner implements ChangeHooks, EventDispatcher,
             }
           });
 
-      fireEvent(refName, event);
+      dispatcher.get().postEvent(refName, event);
 
       if (!refUpdatedHook.isPresent()) {
         return;
@@ -712,7 +673,7 @@ public class ChangeHookRunner implements ChangeHooks, EventDispatcher,
       event.patchSet = patchSetAttributeSupplier(change, patchSet);
       event.reviewer = accountAttributeSupplier(account);
 
-      fireEvent(change, event, db);
+      dispatcher.get().postEvent(change, event, db);
 
       if (!reviewerAddedHook.isPresent()) {
         return;
@@ -742,7 +703,7 @@ public class ChangeHookRunner implements ChangeHooks, EventDispatcher,
       event.changer = accountAttributeSupplier(account);
       event.oldTopic = oldTopic;
 
-      fireEvent(change, event, db);
+      dispatcher.get().postEvent(change, event, db);
 
       if (!topicChangedHook.isPresent()) {
         return;
@@ -783,7 +744,7 @@ public class ChangeHookRunner implements ChangeHooks, EventDispatcher,
       event.added = hashtagArray(added);
       event.removed = hashtagArray(removed);
 
-      fireEvent(change, event, db);
+      dispatcher.get().postEvent(change, event, db);
 
       if (!hashtagsChangedHook.isPresent()) {
         return;
@@ -829,28 +790,6 @@ public class ChangeHookRunner implements ChangeHooks, EventDispatcher,
 
         runHook(claSignedHook, args);
       }
-    }
-
-    @Override
-    public void postEvent(Change change, ChangeEvent event, ReviewDb db)
-        throws OrmException {
-      fireEvent(change, event, db);
-    }
-
-    @Override
-    public void postEvent(Branch.NameKey branchName, RefEvent event) {
-      fireEvent(branchName, event);
-    }
-
-    @Override
-    public void postEvent(Project.NameKey projectName, ProjectEvent event) {
-      fireEvent(projectName, event);
-    }
-
-    @Override
-    public void postEvent(com.google.gerrit.server.events.Event event,
-        ReviewDb db) throws OrmException {
-      fireEvent(event, db);
     }
 
     private Supplier<AccountState> getAccountSupplier(
@@ -913,100 +852,6 @@ public class ChangeHookRunner implements ChangeHooks, EventDispatcher,
               return eventFactory.asChangeAttribute(change);
             }
           });
-    }
-
-    private void fireEventForUnrestrictedListeners(com.google.gerrit.server.events.Event event) {
-      for (EventListener listener : unrestrictedListeners) {
-        listener.onEvent(event);
-      }
-    }
-
-    private void fireEvent(Change change, ChangeEvent event, ReviewDb db)
-        throws OrmException {
-      for (EventListenerHolder holder : listeners.values()) {
-        if (isVisibleTo(change, holder.user, db)) {
-          holder.listener.onEvent(event);
-        }
-      }
-
-      fireEventForUnrestrictedListeners( event );
-    }
-
-    private void fireEvent(Project.NameKey project, ProjectEvent event) {
-      for (EventListenerHolder holder : listeners.values()) {
-        if (isVisibleTo(project, holder.user)) {
-          holder.listener.onEvent(event);
-        }
-      }
-
-      fireEventForUnrestrictedListeners(event);
-    }
-
-    private void fireEvent(Branch.NameKey branchName, RefEvent event) {
-      for (EventListenerHolder holder : listeners.values()) {
-        if (isVisibleTo(branchName, holder.user)) {
-          holder.listener.onEvent(event);
-        }
-      }
-
-      fireEventForUnrestrictedListeners(event);
-    }
-
-    private void fireEvent(com.google.gerrit.server.events.Event event,
-        ReviewDb db) throws OrmException {
-      for (EventListenerHolder holder : listeners.values()) {
-        if (isVisibleTo(event, holder.user, db)) {
-          holder.listener.onEvent(event);
-        }
-      }
-
-      fireEventForUnrestrictedListeners(event);
-    }
-
-    private boolean isVisibleTo(Project.NameKey project, CurrentUser user) {
-      ProjectState pe = projectCache.get(project);
-      if (pe == null) {
-        return false;
-      }
-      return pe.controlFor(user).isVisible();
-    }
-
-    private boolean isVisibleTo(Change change, CurrentUser user, ReviewDb db)
-        throws OrmException {
-      if (change == null) {
-        return false;
-      }
-      ProjectState pe = projectCache.get(change.getProject());
-      if (pe == null) {
-        return false;
-      }
-      ProjectControl pc = pe.controlFor(user);
-      return pc.controlFor(db, change).isVisible(db);
-    }
-
-    private boolean isVisibleTo(Branch.NameKey branchName, CurrentUser user) {
-      ProjectState pe = projectCache.get(branchName.getParentKey());
-      if (pe == null) {
-        return false;
-      }
-      ProjectControl pc = pe.controlFor(user);
-      return pc.controlForRef(branchName).isVisible();
-    }
-
-    private boolean isVisibleTo(com.google.gerrit.server.events.Event event,
-        CurrentUser user, ReviewDb db) throws OrmException {
-      if (event instanceof RefEvent) {
-        RefEvent refEvent = (RefEvent) event;
-        String ref = refEvent.getRefName();
-        if (PatchSet.isChangeRef(ref)) {
-          Change.Id cid = PatchSet.Id.fromRef(ref).getParentKey();
-          Change change = notesFactory
-              .create(db, refEvent.getProjectNameKey(), cid).getChange();
-          return isVisibleTo(change, user, db);
-        }
-        return isVisibleTo(refEvent.getBranchNameKey(), user);
-      }
-      return true;
     }
 
     /**

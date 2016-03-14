@@ -37,6 +37,7 @@ import com.google.gerrit.reviewdb.client.Project;
 import com.google.gerrit.reviewdb.client.RefNames;
 import com.google.gerrit.reviewdb.server.ReviewDb;
 import com.google.gerrit.server.config.AllUsersName;
+import com.google.gerrit.server.config.GerritServerConfig;
 import com.google.gerrit.server.git.GitRepositoryManager;
 import com.google.gerrit.server.git.MultiProgressMonitor;
 import com.google.gerrit.server.git.MultiProgressMonitor.Task;
@@ -47,14 +48,15 @@ import com.google.gerrit.server.index.ReindexAfterUpdate;
 import com.google.gerrit.server.notedb.ChangeRebuilder;
 import com.google.gerrit.server.notedb.NoteDbModule;
 import com.google.gerrit.server.notedb.NotesMigration;
+import com.google.gerrit.server.schema.DisabledChangesReviewDbWrapper;
 import com.google.gwtorm.server.OrmException;
 import com.google.gwtorm.server.SchemaFactory;
 import com.google.inject.AbstractModule;
+import com.google.inject.Inject;
 import com.google.inject.Injector;
-import com.google.inject.Key;
-import com.google.inject.TypeLiteral;
 
 import org.eclipse.jgit.lib.BatchRefUpdate;
+import org.eclipse.jgit.lib.Config;
 import org.eclipse.jgit.lib.NullProgressMonitor;
 import org.eclipse.jgit.lib.ObjectId;
 import org.eclipse.jgit.lib.Ref;
@@ -84,6 +86,28 @@ public class RebuildNotedb extends SiteProgram {
   private Injector dbInjector;
   private Injector sysInjector;
 
+  @Inject
+  private AllUsersName allUsersName;
+
+  @Inject
+  private ChangeRebuilder rebuilder;
+
+  @Inject
+  @GerritServerConfig
+  private Config cfg;
+
+  @Inject
+  private GitRepositoryManager repoManager;
+
+  @Inject
+  private NotesMigration notesMigration;
+
+  @Inject
+  private SchemaFactory<ReviewDb> schemaFactory;
+
+  @Inject
+  private WorkQueue workQueue;
+
   @Override
   public int run() throws Exception {
     mustHaveValidSite();
@@ -95,8 +119,7 @@ public class RebuildNotedb extends SiteProgram {
     dbManager.start();
 
     sysInjector = createSysInjector();
-    NotesMigration notesMigration = sysInjector.getInstance(
-        NotesMigration.class);
+    sysInjector.injectMembers(this);
     if (!notesMigration.enabled()) {
       die("Notedb is not enabled.");
     }
@@ -106,16 +129,11 @@ public class RebuildNotedb extends SiteProgram {
 
     ListeningExecutorService executor = newExecutor();
     System.out.println("Rebuilding the notedb");
-    ChangeRebuilder rebuilder = sysInjector.getInstance(ChangeRebuilder.class);
 
     Multimap<Project.NameKey, Change.Id> changesByProject =
         getChangesByProject();
     AtomicBoolean ok = new AtomicBoolean(true);
     Stopwatch sw = Stopwatch.createStarted();
-    GitRepositoryManager repoManager =
-        sysInjector.getInstance(GitRepositoryManager.class);
-    Project.NameKey allUsersName =
-        sysInjector.getInstance(AllUsersName.class);
     try (Repository allUsersRepo =
         repoManager.openMetadataRepository(allUsersName)) {
       deleteRefs(RefNames.REFS_DRAFT_COMMENTS, allUsersRepo);
@@ -205,8 +223,7 @@ public class RebuildNotedb extends SiteProgram {
   private ListeningExecutorService newExecutor() {
     if (threads > 0) {
       return MoreExecutors.listeningDecorator(
-          dbInjector.getInstance(WorkQueue.class)
-            .createQueue(threads, "RebuildChange"));
+          workQueue.createQueue(threads, "RebuildChange"));
     } else {
       return MoreExecutors.newDirectExecutorService();
     }
@@ -216,16 +233,21 @@ public class RebuildNotedb extends SiteProgram {
       throws OrmException {
     // Memorize all changes so we can close the db connection and allow
     // rebuilder threads to use the full connection pool.
-    SchemaFactory<ReviewDb> schemaFactory = sysInjector.getInstance(Key.get(
-        new TypeLiteral<SchemaFactory<ReviewDb>>() {}));
     Multimap<Project.NameKey, Change.Id> changesByProject =
         ArrayListMultimap.create();
     try (ReviewDb db = schemaFactory.open()) {
-      for (Change c : db.changes().all()) {
+      for (Change c : unwrap(db).changes().all()) {
         changesByProject.put(c.getProject(), c.getId());
       }
       return changesByProject;
     }
+  }
+
+  private static ReviewDb unwrap(ReviewDb db) {
+    if (db instanceof DisabledChangesReviewDbWrapper) {
+      db = ((DisabledChangesReviewDbWrapper) db).unsafeGetDelegate();
+    }
+    return db;
   }
 
   private static class RebuildListener implements Runnable {

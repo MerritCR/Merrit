@@ -18,10 +18,7 @@
     is: 'gr-app',
 
     properties: {
-      account: {
-        type: Object,
-        observer: '_accountChanged',
-      },
+      params: Object,
       accountReady: {
         type: Object,
         readOnly: true,
@@ -32,28 +29,20 @@
           }.bind(this));
         },
       },
-      config: {
-        type: Object,
-        observer: '_configChanged',
-      },
-      configReady: {
-        type: Object,
-        readOnly: true,
-        notify: true,
-        value: function() {
-          return new Promise(function(resolve) {
-            this._resolveConfigReady = resolve;
-          }.bind(this));
-        },
-      },
-      version: String,
-      params: Object,
       keyEventTarget: {
         type: Object,
         value: function() { return document.body; },
       },
 
+      _account: {
+        type: Object,
+        observer: '_accountChanged',
+      },
+      _serverConfig: Object,
+      _version: String,
       _diffPreferences: Object,
+      _preferences: Object,
+      _resolveAccountReady: Function,
       _showChangeListView: Boolean,
       _showDashboardView: Boolean,
       _showChangeView: Boolean,
@@ -74,7 +63,19 @@
     ],
 
     get loggedIn() {
-      return !!(this.account && Object.keys(this.account).length > 0);
+      return !!(this._account && Object.keys(this._account).length > 0);
+    },
+
+    attached: function() {
+      this.$.restAPI.getAccount().then(function(account) {
+        this._account = account;
+      }.bind(this));
+      this.$.restAPI.getConfig().then(function(config) {
+        this._serverConfig = config;
+      }.bind(this));
+      this.$.restAPI.getVersion().then(function(version) {
+        this._version = version;
+      }.bind(this));
     },
 
     ready: function() {
@@ -98,10 +99,14 @@
 
     _accountChanged: function() {
       this._resolveAccountReady();
-      this.$.accountContainer.classList.toggle('loggedIn', this.loggedIn);
-      this.$.accountContainer.classList.toggle('loggedOut', !this.loggedIn);
+
       if (this.loggedIn) {
-        this.$.diffPreferencesXHR.generateRequest();
+        this.$.restAPI.getPreferences().then(function(preferences) {
+          this._preferences = preferences;
+        }.bind(this));
+        this.$.restAPI.getDiffPreferences().then(function(prefs) {
+          this._diffPreferences = prefs;
+        }.bind(this));
       } else {
         // These defaults should match the defaults in
         // gerrit-extension-api/src/main/jcg/gerrit/extensions/client/DiffPreferencesInfo.java
@@ -121,11 +126,11 @@
           tab_size: 8,
           theme: 'DEFAULT',
         };
-      }
-    },
 
-    _configChanged: function(config) {
-      this._resolveConfigReady(config);
+        this._preferences = {
+          changes_per_page: 25,
+        };
+      }
     },
 
     _viewChanged: function(view) {

@@ -11,18 +11,16 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-(function() {
-  'use strict';
+package com.google.gerrit.common;
 
-  Polymer({
-    is: 'gr-account-dropdown',
+import com.google.gerrit.extensions.annotations.ExtensionPoint;
+import com.google.gerrit.server.CurrentUser;
 
-    properties: {
-      account: Object,
-    },
-
-    _showDropdownTapHandler: function(e) {
-      this.$.dropdown.open();
-    },
-  });
-})();
+/**
+ * Allows to listen to events visible to the specified user. To listen to events
+ * without user visibility restrictions, use {@link EventListener}.
+ */
+@ExtensionPoint
+public interface UserScopedEventListener extends EventListener {
+  CurrentUser getUser();
+}

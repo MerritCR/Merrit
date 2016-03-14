@@ -381,9 +381,15 @@ listeners.
 
 * `com.google.gerrit.common.EventListener`:
 +
-Allows to listen to events. These are the same
-link:cmd-stream-events.html#events[events] that are also streamed by
+Allows to listen to events without user visibility restrictions. These
+are the same link:cmd-stream-events.html#events[events] that are also streamed by
 the link:cmd-stream-events.html[gerrit stream-events] command.
+
+* `com.google.gerrit.common.UserScopedEventListener`:
++
+Allows to listen to events visible to the specified user. These are the
+same link:cmd-stream-events.html#events[events] that are also streamed
+by the link:cmd-stream-events.html[gerrit stream-events] command.
 
 * `com.google.gerrit.extensions.events.LifecycleListener`:
 +
@@ -426,6 +432,13 @@ method. This will make the EventType known to the system.
 Deserialzing events with the
 `com.google.gerrit.server.events.EventDeserializer` class requires
 that the event be registered in EventTypes.
+
+== Modifying the Stream Event Flow
+
+It is possible to modify the stream event flow from plugins by registering
+an `com.google.gerrit.server.events.EventDispatcher`. A plugin may register
+a Dispatcher class to replace the internal Dispatcher. EventDispatcher is
+a DynamicItem, so Gerrit may only have one copy.
 
 [[validation]]
 == Validation Listeners
