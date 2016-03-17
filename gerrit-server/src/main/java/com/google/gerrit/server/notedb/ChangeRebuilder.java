@@ -19,6 +19,7 @@ import static com.google.common.base.Preconditions.checkState;
 import static com.google.gerrit.server.PatchLineCommentsUtil.setCommentRevId;
 import static com.google.gerrit.server.notedb.ChangeNoteUtil.FOOTER_HASHTAGS;
 import static com.google.gerrit.server.notedb.ChangeNoteUtil.FOOTER_PATCH_SET;
+import static java.util.concurrent.TimeUnit.SECONDS;
 
 import com.google.common.base.MoreObjects;
 import com.google.common.base.Splitter;
@@ -56,6 +57,9 @@ import com.google.gwtorm.server.SchemaFactory;
 import com.google.inject.Inject;
 import com.google.inject.util.Providers;
 
+import org.eclipse.jgit.errors.ConfigInvalidException;
+import org.eclipse.jgit.errors.InvalidObjectIdException;
+import org.eclipse.jgit.errors.MissingObjectException;
 import org.eclipse.jgit.lib.Constants;
 import org.eclipse.jgit.lib.ObjectId;
 import org.eclipse.jgit.lib.ObjectInserter;
@@ -72,13 +76,26 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.Callable;
-import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 public class ChangeRebuilder {
-  private static final long TS_WINDOW_MS =
-      TimeUnit.MILLISECONDS.convert(1, TimeUnit.SECONDS);
+  /**
+   * The maximum amount of time between the ReviewDb timestamp of the first and
+   * last events batched together into a single NoteDb update.
+   * <p>
+   * Used to account for the fact that different records with their own
+   * timestamps (e.g. {@link PatchSetApproval} and {@link ChangeMessage})
+   * historically didn't necessarily use the same timestamp, and tended to call
+   * {@code System.currentTimeMillis()} independently.
+   */
+  static final long MAX_WINDOW_MS = SECONDS.toMillis(3);
+
+  /**
+   * The maximum amount of time between two consecutive events to consider them
+   * to be in the same batch.
+   */
+  private static final long MAX_DELTA_MS = SECONDS.toMillis(1);
 
   private final SchemaFactory<ReviewDb> schemaFactory;
   private final GitRepositoryManager repoManager;
@@ -89,6 +106,7 @@ public class ChangeRebuilder {
   private final ChangeUpdate.Factory updateFactory;
   private final ChangeDraftUpdate.Factory draftUpdateFactory;
   private final NoteDbUpdateManager.Factory updateManagerFactory;
+  private final ChangeNoteUtil changeNoteUtil;
 
   @Inject
   ChangeRebuilder(SchemaFactory<ReviewDb> schemaFactory,
@@ -99,7 +117,8 @@ public class ChangeRebuilder {
       PatchListCache patchListCache,
       ChangeUpdate.Factory updateFactory,
       ChangeDraftUpdate.Factory draftUpdateFactory,
-      NoteDbUpdateManager.Factory updateManagerFactory) {
+      NoteDbUpdateManager.Factory updateManagerFactory,
+      ChangeNoteUtil changeNoteUtil) {
     this.schemaFactory = schemaFactory;
     this.repoManager = repoManager;
     this.controlFactory = controlFactory;
@@ -109,6 +128,7 @@ public class ChangeRebuilder {
     this.updateFactory = updateFactory;
     this.draftUpdateFactory = draftUpdateFactory;
     this.updateManagerFactory = updateManagerFactory;
+    this.changeNoteUtil = changeNoteUtil;
   }
 
   public ListenableFuture<?> rebuildAsync(final Change.Id id,
@@ -125,7 +145,8 @@ public class ChangeRebuilder {
   }
 
   public void rebuild(ReviewDb db, Change.Id changeId)
-      throws NoSuchChangeException, IOException, OrmException {
+      throws NoSuchChangeException, IOException, OrmException,
+      ConfigInvalidException {
     Change change = db.changes().get(changeId);
     if (change == null) {
       return;
@@ -149,7 +170,10 @@ public class ChangeRebuilder {
         RevWalk codeRw = new RevWalk(codeRepo)) {
       for (PatchSet ps : db.patchSets().byChange(changeId)) {
         events.add(new PatchSetEvent(change, ps, codeRw));
-        for (PatchLineComment c : db.patchComments().byPatchSet(ps.getId())) {
+        List<PatchLineComment> comments =
+            PatchLineCommentsUtil.PLC_ORDER.sortedCopy(
+                db.patchComments().byPatchSet(ps.getId()));
+        for (PatchLineComment c : comments) {
           PatchLineCommentEvent e =
               new PatchLineCommentEvent(c, change, ps, patchListCache);
           if (c.getStatus() == Status.PUBLISHED) {
@@ -162,12 +186,13 @@ public class ChangeRebuilder {
     }
 
     for (PatchSetApproval psa : db.patchSetApprovals().byChange(changeId)) {
-      events.add(new ApprovalEvent(psa));
+      events.add(new ApprovalEvent(psa, change.getCreatedOn()));
     }
 
     Change notedbChange = new Change(null, null, null, null, null);
     for (ChangeMessage msg : db.changeMessages().byChange(changeId)) {
-      events.add(new ChangeMessageEvent(msg, notedbChange));
+      events.add(
+          new ChangeMessageEvent(msg, notedbChange, change.getCreatedOn()));
     }
 
     Collections.sort(events, EVENT_ORDER);
@@ -254,7 +279,7 @@ public class ChangeRebuilder {
   }
 
   private List<HashtagsEvent> getHashtagsEvents(Change change,
-      NoteDbUpdateManager manager) throws IOException {
+      NoteDbUpdateManager manager) throws IOException, ConfigInvalidException {
     String refName = ChangeNoteUtil.changeRefName(change.getId());
     ObjectId old = manager.getChangeCommands()
         .getObjectId(manager.getChangeRepo(), refName);
@@ -268,7 +293,7 @@ public class ChangeRebuilder {
     rw.markStart(rw.parseCommit(old));
     for (RevCommit commit : rw) {
       Account.Id authorId =
-          ChangeNoteUtil.parseIdent(commit.getAuthorIdent());
+          changeNoteUtil.parseIdent(commit.getAuthorIdent(), change.getId());
       PatchSet.Id psId = parsePatchSetId(change, commit);
       Set<String> hashtags = parseHashtags(commit);
       if (authorId == null || psId == null || hashtags == null) {
@@ -277,7 +302,8 @@ public class ChangeRebuilder {
 
       Timestamp commitTime =
           new Timestamp(commit.getCommitterIdent().getWhen().getTime());
-      events.add(new HashtagsEvent(psId, authorId, commitTime, hashtags));
+      events.add(new HashtagsEvent(psId, authorId, commitTime, hashtags,
+            change.getCreatedOn()));
     }
     return events;
   }
@@ -320,6 +346,7 @@ public class ChangeRebuilder {
     @Override
     public int compare(Event a, Event b) {
       return ComparisonChain.start()
+          .compareTrueFirst(a.predatesChange, b.predatesChange)
           .compare(a.when, b.when)
           .compare(a.who.get(), b.who.get())
           .compare(a.psId.get(), b.psId.get())
@@ -334,18 +361,22 @@ public class ChangeRebuilder {
     final PatchSet.Id psId;
     final Account.Id who;
     final Timestamp when;
+    final boolean predatesChange;
 
-    protected Event(PatchSet.Id psId, Account.Id who, Timestamp when) {
+    protected Event(PatchSet.Id psId, Account.Id who, Timestamp when,
+        Timestamp changeCreatedOn) {
       this.psId = psId;
       this.who = who;
-      this.when = when;
+      // Truncate timestamps at the change's createdOn timestamp.
+      predatesChange = when.before(changeCreatedOn);
+      this.when = predatesChange ? changeCreatedOn : when;
     }
 
     protected void checkUpdate(AbstractChangeUpdate update) {
       checkState(Objects.equals(update.getPatchSetId(), psId),
           "cannot apply event for %s to update for %s",
           update.getPatchSetId(), psId);
-      checkState(when.getTime() - update.getWhen().getTime() <= TS_WINDOW_MS,
+      checkState(when.getTime() - update.getWhen().getTime() <= MAX_WINDOW_MS,
           "event at %s outside update window starting at %s",
           when, update.getWhen());
       checkState(Objects.equals(update.getUser().getAccountId(), who),
@@ -373,9 +404,6 @@ public class ChangeRebuilder {
 
   private class EventList<E extends Event> extends ArrayList<E> {
     private static final long serialVersionUID = 1L;
-
-    private static final long MAX_DELTA_MS = 1000;
-    private static final long MAX_WINDOW_MS = 5000;
 
     private E getLast() {
       return get(size() - 1);
@@ -456,8 +484,9 @@ public class ChangeRebuilder {
   private static class ApprovalEvent extends Event {
     private PatchSetApproval psa;
 
-    ApprovalEvent(PatchSetApproval psa) {
-      super(psa.getPatchSetId(), psa.getAccountId(), psa.getGranted());
+    ApprovalEvent(PatchSetApproval psa, Timestamp changeCreatedOn) {
+      super(psa.getPatchSetId(), psa.getAccountId(), psa.getGranted(),
+          changeCreatedOn);
       this.psa = psa;
     }
 
@@ -479,7 +508,8 @@ public class ChangeRebuilder {
     private final RevWalk rw;
 
     PatchSetEvent(Change change, PatchSet ps, RevWalk rw) {
-      super(ps.getId(), ps.getUploader(), ps.getCreatedOn());
+      super(ps.getId(), ps.getUploader(), ps.getCreatedOn(),
+          change.getCreatedOn());
       this.change = change;
       this.ps = ps;
       this.rw = rw;
@@ -501,11 +531,29 @@ public class ChangeRebuilder {
       } else {
         update.setSubjectForCommit("Create patch set " + ps.getPatchSetId());
       }
-      update.setCommit(rw, ObjectId.fromString(ps.getRevision().get()),
-          ps.getPushCertificate());
+      setRevision(update, ps);
       update.setGroups(ps.getGroups());
       if (ps.isDraft()) {
         update.setPatchSetState(PatchSetState.DRAFT);
+      }
+    }
+
+    private void setRevision(ChangeUpdate update, PatchSet ps)
+        throws IOException {
+      String rev = ps.getRevision().get();
+      String cert = ps.getPushCertificate();
+      ObjectId id;
+      try {
+        id = ObjectId.fromString(rev);
+      } catch (InvalidObjectIdException e) {
+        update.setRevisionForMissingCommit(rev, cert);
+        return;
+      }
+      try {
+        update.setCommit(rw, id, cert);
+      } catch (MissingObjectException e) {
+        update.setRevisionForMissingCommit(rev, cert);
+        return;
       }
     }
   }
@@ -518,7 +566,8 @@ public class ChangeRebuilder {
 
     PatchLineCommentEvent(PatchLineComment c, Change change, PatchSet ps,
         PatchListCache cache) {
-      super(PatchLineCommentsUtil.getCommentPsId(c), c.getAuthor(), c.getWrittenOn());
+      super(PatchLineCommentsUtil.getCommentPsId(c), c.getAuthor(),
+          c.getWrittenOn(), change.getCreatedOn());
       this.c = c;
       this.change = change;
       this.ps = ps;
@@ -551,8 +600,8 @@ public class ChangeRebuilder {
     private final Set<String> hashtags;
 
     HashtagsEvent(PatchSet.Id psId, Account.Id who, Timestamp when,
-        Set<String> hashtags) {
-      super(psId, who, when);
+        Set<String> hashtags, Timestamp changeCreatdOn) {
+      super(psId, who, when, changeCreatdOn);
       this.hashtags = hashtags;
     }
 
@@ -585,9 +634,10 @@ public class ChangeRebuilder {
     private final ChangeMessage message;
     private final Change notedbChange;
 
-    ChangeMessageEvent(ChangeMessage message, Change notedbChange) {
+    ChangeMessageEvent(ChangeMessage message, Change notedbChange,
+        Timestamp changeCreatedOn) {
       super(message.getPatchSetId(), message.getAuthor(),
-          message.getWrittenOn());
+          message.getWrittenOn(), changeCreatedOn);
       this.message = message;
       this.notedbChange = notedbChange;
     }
@@ -650,11 +700,7 @@ public class ChangeRebuilder {
 
     FinalUpdatesEvent(Change change, Change notedbChange) {
       super(change.currentPatchSetId(), change.getOwner(),
-          // TODO(dborowitz): This should maybe be a synthetic timestamp just
-          // after the actual last update in the history. On the one hand using
-          // the commit updated time is reasonable, but on the other it might be
-          // non-monotonic, and who knows what would break then.
-          change.getLastUpdatedOn());
+          change.getLastUpdatedOn(), change.getCreatedOn());
       this.change = change;
       this.notedbChange = notedbChange;
     }

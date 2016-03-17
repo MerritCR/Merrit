@@ -67,11 +67,35 @@ limitations under the License.
           'Should navigate to /');
       showStub.restore();
 
+
       MockInteractions.pressAndReleaseKeyOn(element, 65);  // 'a'
       var overlayEl = element.$.replyOverlay;
+      assert.isFalse(overlayEl.opened);
+      element._loggedIn = true;
+
+      MockInteractions.pressAndReleaseKeyOn(element, 65);  // 'a'
       assert.isTrue(overlayEl.opened);
       overlayEl.close();
       assert.isFalse(overlayEl.opened);
+    });
+
+    test('reply button is highlighted when there are drafts', function() {
+      var replyButton = element.$$('gr-button.reply');
+      assert.ok(replyButton);
+      assert.isFalse(replyButton.hasAttribute('primary'));
+
+      element._diffDrafts = null;
+      assert.isFalse(replyButton.hasAttribute('primary'));
+
+      element._diffDrafts = {};
+      assert.isFalse(replyButton.hasAttribute('primary'));
+
+      element._diffDrafts = {
+        'file1.txt': [{}],
+        'file2.txt': [{}, {}],
+      };
+      assert.isTrue(replyButton.hasAttribute('primary'));
+      assert.equal(replyButton.textContent, 'Reply (3)');
     });
 
     test('patch num change', function(done) {

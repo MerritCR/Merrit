@@ -36,7 +36,7 @@ limitations under the License.
     var element;
     var server;
 
-    setup(function() {
+    setup(function(done) {
       element = fixture('basic');
       server = sinon.fakeServer.create();
 
@@ -91,15 +91,21 @@ limitations under the License.
 
       element.changeNum = '42';
       element.patchNum = '2';
-      element.reload();
+      element.reload().then(function() {
+        done();
+      });
 
       server.respond();
     });
 
-    test('submit and rebase buttons show', function(done) {
+    teardown(function() {
+      server.restore();
+    });
+
+    test('submit, rebase, and cherry-pick buttons show', function(done) {
       flush(function() {
         var buttonEls = Polymer.dom(element.root).querySelectorAll('gr-button');
-        assert.equal(buttonEls.length, 2);
+        assert.equal(buttonEls.length, 3);
         assert.isFalse(element.hidden);
         done();
       });

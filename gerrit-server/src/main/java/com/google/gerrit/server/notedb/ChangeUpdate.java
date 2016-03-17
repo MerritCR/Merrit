@@ -100,7 +100,6 @@ public class ChangeUpdate extends AbstractChangeUpdate {
   }
 
   private final AccountCache accountCache;
-  private final CommentsInNotesUtil commentsUtil;
   private final ChangeDraftUpdate.Factory draftUpdateFactory;
   private final NoteDbUpdateManager.Factory updateManagerFactory;
 
@@ -116,7 +115,7 @@ public class ChangeUpdate extends AbstractChangeUpdate {
   private String submissionId;
   private List<PatchLineComment> comments;
   private String topic;
-  private ObjectId commit;
+  private String commit;
   private Set<String> hashtags;
   private String changeMessage;
   private PatchSetState psState;
@@ -136,10 +135,10 @@ public class ChangeUpdate extends AbstractChangeUpdate {
       ChangeDraftUpdate.Factory draftUpdateFactory,
       ProjectCache projectCache,
       @Assisted ChangeControl ctl,
-      CommentsInNotesUtil commentsUtil) {
+      ChangeNoteUtil noteUtil) {
     this(serverIdent, anonymousCowardName, repoManager, migration, accountCache,
         updateManagerFactory, draftUpdateFactory,
-        projectCache, ctl, serverIdent.getWhen(), commentsUtil);
+        projectCache, ctl, serverIdent.getWhen(), noteUtil);
   }
 
   @AssistedInject
@@ -154,12 +153,12 @@ public class ChangeUpdate extends AbstractChangeUpdate {
       ProjectCache projectCache,
       @Assisted ChangeControl ctl,
       @Assisted Date when,
-      CommentsInNotesUtil commentsUtil) {
+      ChangeNoteUtil noteUtil) {
     this(serverIdent, anonymousCowardName, repoManager, migration, accountCache,
         updateManagerFactory, draftUpdateFactory, ctl,
         when,
         projectCache.get(getProjectName(ctl)).getLabelTypes().nameComparator(),
-        commentsUtil);
+        noteUtil);
   }
 
   private static Project.NameKey getProjectName(ChangeControl ctl) {
@@ -178,11 +177,10 @@ public class ChangeUpdate extends AbstractChangeUpdate {
       @Assisted ChangeControl ctl,
       @Assisted Date when,
       @Assisted Comparator<String> labelNameComparator,
-      CommentsInNotesUtil commentsUtil) {
+      ChangeNoteUtil noteUtil) {
     super(migration, repoManager, ctl, serverIdent,
-        anonymousCowardName, when);
+        anonymousCowardName, noteUtil, when);
     this.accountCache = accountCache;
-    this.commentsUtil = commentsUtil;
     this.draftUpdateFactory = draftUpdateFactory;
     this.updateManagerFactory = updateManagerFactory;
 
@@ -267,7 +265,7 @@ public class ChangeUpdate extends AbstractChangeUpdate {
 
   @VisibleForTesting
   ObjectId getCommit() {
-    return commit;
+    return ObjectId.fromString(commit);
   }
 
   public void setChangeMessage(String changeMessage) {
@@ -327,8 +325,17 @@ public class ChangeUpdate extends AbstractChangeUpdate {
       throws IOException {
     RevCommit commit = rw.parseCommit(id);
     rw.parseBody(commit);
-    this.commit = commit;
+    this.commit = commit.name();
     subject = commit.getShortMessage();
+    this.pushCert = pushCert;
+  }
+
+  /**
+   * Set the revision without depending on the commit being present in the
+   * repository; should only be used for converting old corrupt commits.
+   */
+  public void setRevisionForMissingCommit(String id, String pushCert) {
+    commit = id;
     this.pushCert = pushCert;
   }
 
@@ -368,14 +375,14 @@ public class ChangeUpdate extends AbstractChangeUpdate {
     }
     if (pushCert != null) {
       checkState(commit != null);
-      cache.get(new RevId(commit.name())).setPushCertificate(pushCert);
+      cache.get(new RevId(commit)).setPushCertificate(pushCert);
     }
     Map<RevId, RevisionNoteBuilder> builders = cache.getBuilders();
     checkComments(rnm.revisionNotes, builders);
 
     for (Map.Entry<RevId, RevisionNoteBuilder> e : builders.entrySet()) {
       ObjectId data = inserter.insert(
-          OBJ_BLOB, e.getValue().build(commentsUtil));
+          OBJ_BLOB, e.getValue().build(noteUtil));
       rnm.noteMap.set(ObjectId.fromString(e.getKey().get()), data);
     }
 
@@ -401,7 +408,7 @@ public class ChangeUpdate extends AbstractChangeUpdate {
     // Even though reading from changes might not be enabled, we need to
     // parse any existing revision notes so we can merge them.
     return RevisionNoteMap.parse(
-        ctl.getId(), rw.getObjectReader(), noteMap, false);
+        noteUtil, ctl.getId(), rw.getObjectReader(), noteMap, false);
   }
 
   private void checkComments(Map<RevId, RevisionNote> existingNotes,
@@ -489,7 +496,7 @@ public class ChangeUpdate extends AbstractChangeUpdate {
     }
 
     if (commit != null) {
-      addFooter(msg, FOOTER_COMMIT, commit.name());
+      addFooter(msg, FOOTER_COMMIT, commit);
     }
 
     Joiner comma = Joiner.on(',');
