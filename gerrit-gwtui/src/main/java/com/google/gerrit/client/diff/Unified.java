@@ -18,12 +18,12 @@ import static java.lang.Double.POSITIVE_INFINITY;
 
 import com.google.gerrit.client.Dispatcher;
 import com.google.gerrit.client.Gerrit;
-import com.google.gerrit.client.account.DiffPreferences;
 import com.google.gerrit.client.diff.UnifiedChunkManager.LineSidePair;
 import com.google.gerrit.client.patches.PatchUtil;
 import com.google.gerrit.client.projects.ConfigInfoCache;
 import com.google.gerrit.client.rpc.ScreenLoadCallback;
 import com.google.gerrit.client.ui.InlineHyperlink;
+import com.google.gerrit.extensions.client.GeneralPreferencesInfo.DiffView;
 import com.google.gerrit.reviewdb.client.Patch;
 import com.google.gerrit.reviewdb.client.PatchSet;
 import com.google.gwt.core.client.GWT;
@@ -78,7 +78,7 @@ public class Unified extends DiffScreen {
       String path,
       DisplaySide startSide,
       int startLine) {
-    super(base, revision, path, startSide, startLine, DiffScreenType.UNIFIED);
+    super(base, revision, path, startSide, startLine, DiffView.UNIFIED_DIFF);
 
     diffTable = new UnifiedTable(this, base, revision, path);
     add(uiBinder.createAndBindUi(this));
@@ -93,7 +93,7 @@ public class Unified extends DiffScreen {
       protected void preDisplay(ConfigInfoCache.Entry result) {
         commentManager = new UnifiedCommentManager(
             Unified.this,
-            getBase(), getRevision(), getPath(),
+            base, revision, path,
             result.getCommentLinkProcessor(),
             getChangeStatus().isOpen());
         setTheme(result.getTheme());
@@ -113,7 +113,7 @@ public class Unified extends DiffScreen {
         cm.refresh();
       }
     });
-    setLineLength(Patch.COMMIT_MSG.equals(getPath()) ? 72 : getPrefs().lineLength());
+    setLineLength(Patch.COMMIT_MSG.equals(path) ? 72 : prefs.lineLength());
     diffTable.refresh();
 
     if (getStartLine() == 0) {
@@ -135,7 +135,7 @@ public class Unified extends DiffScreen {
       cm.setCursor(Pos.create(0));
       cm.focus();
     }
-    if (Gerrit.isSignedIn() && getPrefs().autoReview()) {
+    if (Gerrit.isSignedIn() && prefs.autoReview()) {
       header.autoReview();
     }
     prefetchNextFile();
@@ -175,7 +175,6 @@ public class Unified extends DiffScreen {
   }
 
   private void display(final CommentsCollections comments) {
-    final DiffPreferences prefs = getPrefs();
     final DiffInfo diff = getDiff();
     setThemeStyles(prefs.theme().isDark());
     setShowIntraline(prefs.intralineDifference());
@@ -207,7 +206,7 @@ public class Unified extends DiffScreen {
     registerCmEvents(cm);
 
     setPrefsAction(new PreferencesAction(this, prefs));
-    header.init(getPrefsAction(), getSideBySideDiffLink(), diff.sideBySideWebLinks());
+    header.init(getPrefsAction(), getSideBySideDiffLink(), diff.unifiedWebLinks());
     setAutoHideDiffHeader(prefs.autoHideDiffTableHeader());
 
     setupSyntaxHighlighting();
@@ -218,7 +217,7 @@ public class Unified extends DiffScreen {
     toSideBySideDiffLink.setHTML(
         new ImageResourceRenderer().render(Gerrit.RESOURCES.sideBySideDiff()));
     toSideBySideDiffLink.setTargetHistoryToken(
-        Dispatcher.toSideBySide(getBase(), getRevision(), getPath()));
+        Dispatcher.toSideBySide(base, revision, path));
     toSideBySideDiffLink.setTitle(PatchUtil.C.sideBySideDiff());
     return Collections.singletonList(toSideBySideDiffLink);
   }
@@ -228,7 +227,6 @@ public class Unified extends DiffScreen {
       DiffInfo.FileMeta meta,
       String contents,
       Element parent) {
-    DiffPreferences prefs = getPrefs();
     JsArrayString gutters = JavaScriptObject.createArray().cast();
     gutters.push(UnifiedTable.style.lineNumbersLeft());
     gutters.push(UnifiedTable.style.lineNumbersRight());
@@ -237,6 +235,7 @@ public class Unified extends DiffScreen {
         .set("cursorBlinkRate", prefs.cursorBlinkRate())
         .set("cursorHeight", 0.85)
         .set("gutters", gutters)
+        .set("inputStyle", "textarea")
         .set("keyMap", "vim_ro")
         .set("lineNumbers", false)
         .set("lineWrapping", false)
@@ -297,7 +296,6 @@ public class Unified extends DiffScreen {
   @Override
   void setSyntaxHighlighting(boolean b) {
     final DiffInfo diff = getDiff();
-    final DiffPreferences prefs = getPrefs();
     if (b) {
       injectMode(diff, new AsyncCallback<Void>() {
         @Override

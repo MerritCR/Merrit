@@ -48,8 +48,8 @@ import com.google.gerrit.server.git.GarbageCollection;
 import com.google.gerrit.server.git.GitRepositoryManager;
 import com.google.gerrit.server.git.PerThreadRequestScope;
 import com.google.gerrit.server.git.SendEmailExecutor;
-import com.google.gerrit.server.index.ChangeSchemas;
 import com.google.gerrit.server.index.IndexModule.IndexType;
+import com.google.gerrit.server.index.change.ChangeSchemas;
 import com.google.gerrit.server.mail.SignedTokenEmailTokenVerifier;
 import com.google.gerrit.server.notedb.NotesMigration;
 import com.google.gerrit.server.patch.DiffExecutor;
@@ -239,9 +239,8 @@ public class InMemoryModule extends FactoryModule {
           "invalid index.lucene.testVersion %s", version);
       Class<?> clazz =
           Class.forName("com.google.gerrit.lucene.LuceneIndexModule");
-      Constructor<?> c =
-          clazz.getConstructor(Integer.class, int.class, String.class);
-      return (Module) c.newInstance(version, 0, null);
+      Constructor<?> c = clazz.getConstructor(Integer.class, int.class);
+      return (Module) c.newInstance(version, 0);
     } catch (ClassNotFoundException | SecurityException | NoSuchMethodException
         | IllegalArgumentException | InstantiationException
         | IllegalAccessException | InvocationTargetException e) {

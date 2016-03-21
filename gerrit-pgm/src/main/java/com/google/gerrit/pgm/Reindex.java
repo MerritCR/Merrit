@@ -28,12 +28,12 @@ import com.google.gerrit.reviewdb.client.Project;
 import com.google.gerrit.server.config.GerritServerConfig;
 import com.google.gerrit.server.git.GitRepositoryManager;
 import com.google.gerrit.server.git.ScanningChangeCacheImpl;
-import com.google.gerrit.server.index.ChangeIndex;
-import com.google.gerrit.server.index.ChangeSchemas;
-import com.google.gerrit.server.index.IndexCollection;
 import com.google.gerrit.server.index.IndexModule;
 import com.google.gerrit.server.index.IndexModule.IndexType;
 import com.google.gerrit.server.index.SiteIndexer;
+import com.google.gerrit.server.index.change.ChangeIndex;
+import com.google.gerrit.server.index.change.ChangeIndexCollection;
+import com.google.gerrit.server.index.change.ChangeSchemas;
 import com.google.gerrit.server.notedb.ChangeNotes;
 import com.google.gerrit.server.project.ProjectCache;
 import com.google.inject.Injector;
@@ -58,9 +58,6 @@ public class Reindex extends SiteProgram {
   @Option(name = "--schema-version",
       usage = "Schema version to reindex; default is most recent version")
   private Integer version;
-
-  @Option(name = "--output", usage = "Prefix for output; path for local disk index, or prefix for remote index")
-  private String outputBase;
 
   @Option(name = "--verbose", usage = "Output debug information for each change")
   private boolean verbose;
@@ -100,7 +97,8 @@ public class Reindex extends SiteProgram {
     projectCache = sysInjector.getInstance(ProjectCache.class);
     repoManager = sysInjector.getInstance(GitRepositoryManager.class);
 
-    index = sysInjector.getInstance(IndexCollection.class).getSearchIndex();
+    index = sysInjector.getInstance(ChangeIndexCollection.class)
+        .getSearchIndex();
     int result = 0;
     try {
       index.markReady(false);
@@ -126,7 +124,7 @@ public class Reindex extends SiteProgram {
     Module changeIndexModule;
     switch (IndexModule.getIndexType(dbInjector)) {
       case LUCENE:
-        changeIndexModule = new LuceneIndexModule(version, threads, outputBase);
+        changeIndexModule = new LuceneIndexModule(version, threads);
         break;
       default:
         throw new IllegalStateException("unsupported index.type");

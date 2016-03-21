@@ -17,11 +17,11 @@ package com.google.gerrit.lucene;
 import com.google.gerrit.extensions.events.LifecycleListener;
 import com.google.gerrit.lifecycle.LifecycleModule;
 import com.google.gerrit.server.config.GerritServerConfig;
-import com.google.gerrit.server.index.ChangeSchemas;
-import com.google.gerrit.server.index.IndexCollection;
 import com.google.gerrit.server.index.IndexConfig;
 import com.google.gerrit.server.index.IndexModule;
 import com.google.gerrit.server.index.Schema;
+import com.google.gerrit.server.index.change.ChangeIndexCollection;
+import com.google.gerrit.server.index.change.ChangeSchemas;
 import com.google.gerrit.server.query.change.ChangeData;
 import com.google.inject.Inject;
 import com.google.inject.Provides;
@@ -32,17 +32,14 @@ import org.eclipse.jgit.lib.Config;
 public class LuceneIndexModule extends LifecycleModule {
   private final Integer singleVersion;
   private final int threads;
-  private final String base;
 
   public LuceneIndexModule() {
-    this(null, 0, null);
+    this(null, 0);
   }
 
-  public LuceneIndexModule(Integer singleVersion, int threads,
-      String base) {
+  public LuceneIndexModule(Integer singleVersion, int threads) {
     this.singleVersion = singleVersion;
     this.threads = threads;
-    this.base = base;
   }
 
   @Override
@@ -50,7 +47,7 @@ public class LuceneIndexModule extends LifecycleModule {
     factory(LuceneChangeIndex.Factory.class);
     factory(OnlineReindexer.Factory.class);
     install(new IndexModule(threads));
-    if (singleVersion == null && base == null) {
+    if (singleVersion == null) {
       install(new MultiVersionModule());
     } else {
       install(new SingleVersionModule());
@@ -82,17 +79,17 @@ public class LuceneIndexModule extends LifecycleModule {
       Schema<ChangeData> schema = singleVersion != null
           ? ChangeSchemas.get(singleVersion)
           : ChangeSchemas.getLatest();
-      return factory.create(schema, base);
+      return factory.create(schema);
     }
   }
 
   @Singleton
   static class SingleVersionListener implements LifecycleListener {
-    private final IndexCollection indexes;
+    private final ChangeIndexCollection indexes;
     private final LuceneChangeIndex index;
 
     @Inject
-    SingleVersionListener(IndexCollection indexes,
+    SingleVersionListener(ChangeIndexCollection indexes,
         LuceneChangeIndex index) {
       this.indexes = indexes;
       this.index = index;

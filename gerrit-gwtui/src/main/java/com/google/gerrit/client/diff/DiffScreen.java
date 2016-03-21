@@ -39,6 +39,7 @@ import com.google.gerrit.client.rpc.RestApi;
 import com.google.gerrit.client.rpc.ScreenLoadCallback;
 import com.google.gerrit.client.ui.Screen;
 import com.google.gerrit.common.PageLinks;
+import com.google.gerrit.extensions.client.GeneralPreferencesInfo.DiffView;
 import com.google.gerrit.extensions.client.ListChangesOption;
 import com.google.gerrit.reviewdb.client.Change;
 import com.google.gerrit.reviewdb.client.Patch;
@@ -94,17 +95,15 @@ abstract class DiffScreen extends Screen {
     }
   }
 
-  enum DiffScreenType {
-    SIDE_BY_SIDE, UNIFIED
-  }
-
   private final Change.Id changeId;
-  private final PatchSet.Id base;
-  private final PatchSet.Id revision;
-  private final String path;
+  final PatchSet.Id base;
+  final PatchSet.Id revision;
+  final String path;
+  final DiffPreferences prefs;
+  final DiffView diffScreenType;
+
   private DisplaySide startSide;
   private int startLine;
-  private DiffPreferences prefs;
   private Change.Status changeStatus;
 
   private HandlerRegistration resizeHandler;
@@ -128,13 +127,14 @@ abstract class DiffScreen extends Screen {
       String path,
       DisplaySide startSide,
       int startLine,
-      DiffScreenType diffScreenType) {
+      DiffView diffScreenType) {
     this.base = base;
     this.revision = revision;
     this.changeId = revision.getParentKey();
     this.path = path;
     this.startSide = startSide;
     this.startLine = startLine;
+    this.diffScreenType = diffScreenType;
 
     prefs = DiffPreferences.create(Gerrit.getDiffPreferences());
     handlers = new ArrayList<>(6);
@@ -250,7 +250,7 @@ abstract class DiffScreen extends Screen {
 
     Window.enableScrolling(false);
     JumpKeys.enable(false);
-    if (getPrefs().hideTopMenu()) {
+    if (prefs.hideTopMenu()) {
       Gerrit.setHeaderVisible(false);
     }
     resizeHandler = Window.addResizeHandler(new ResizeHandler() {
@@ -642,18 +642,6 @@ abstract class DiffScreen extends Screen {
 
   abstract SkipManager getSkipManager();
 
-  DiffPreferences getPrefs() {
-    return prefs;
-  }
-
-  PatchSet.Id getRevision() {
-    return revision;
-  }
-
-  PatchSet.Id getBase() {
-    return base;
-  }
-
   Change.Status getChangeStatus() {
     return changeStatus;
   }
@@ -795,10 +783,6 @@ abstract class DiffScreen extends Screen {
   }
 
   abstract void setAutoHideDiffHeader(boolean hide);
-
-  String getPath() {
-    return path;
-  }
 
   void prefetchNextFile() {
     String nextPath = header.getNextPath();

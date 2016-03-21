@@ -14,30 +14,33 @@
 (function(window, GrDiffBuilder) {
   'use strict';
 
-  function GrDiffBuilderSideBySide(diff, outputEl) {
-    GrDiffBuilder.call(this, diff, outputEl);
+  function GrDiffBuilderSideBySide(diff, prefs, outputEl) {
+    GrDiffBuilder.call(this, diff, prefs, outputEl);
   }
   GrDiffBuilderSideBySide.prototype = Object.create(GrDiffBuilder.prototype);
   GrDiffBuilderSideBySide.prototype.constructor = GrDiffBuilderSideBySide;
 
-  GrDiffBuilderSideBySide.prototype._emitGroup = function(group,
+  GrDiffBuilderSideBySide.prototype.emitGroup = function(group,
       opt_beforeSection) {
     var sectionEl = this._createElement('tbody', 'section');
+    sectionEl.classList.add(group.type);
     var pairs = group.getSideBySidePairs();
-    for (var i = 0; i < pairs.length; ++i) {
-      sectionEl.appendChild(this._createRow(pairs[i].left, pairs[i].right));
+    for (var i = 0; i < pairs.length; i++) {
+      sectionEl.appendChild(this._createRow(sectionEl, pairs[i].left,
+          pairs[i].right));
     }
     this._outputEl.insertBefore(sectionEl, opt_beforeSection);
   },
 
-  GrDiffBuilderSideBySide.prototype._createRow = function(leftLine, rightLine) {
+  GrDiffBuilderSideBySide.prototype._createRow = function(section, leftLine,
+      rightLine) {
     var row = this._createElement('tr');
-    this._createPair(row, leftLine, leftLine.beforeNumber);
-    this._createPair(row, rightLine, rightLine.afterNumber);
+    this._createPair(section, row, leftLine, leftLine.beforeNumber);
+    this._createPair(section, row, rightLine, rightLine.afterNumber);
     return row;
   };
 
-  GrDiffBuilderSideBySide.prototype._createPair = function(row, line,
+  GrDiffBuilderSideBySide.prototype._createPair = function(section, row, line,
       lineNumber) {
     if (line.type === GrDiffLine.Type.BLANK) {
       row.appendChild(this._createBlankSideEl());
@@ -45,7 +48,12 @@
     }
 
     row.appendChild(this._createLineEl(line, lineNumber, line.type));
-    row.appendChild(this._createTextEl(line));
+    var action = this._createContextControl(section, line);
+    if (action) {
+      row.appendChild(action);
+    } else {
+      row.appendChild(this._createTextEl(line));
+    }
     return row;
   };
 

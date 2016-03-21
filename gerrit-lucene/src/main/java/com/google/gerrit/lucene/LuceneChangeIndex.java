@@ -17,11 +17,11 @@ package com.google.gerrit.lucene;
 import static com.google.common.base.Preconditions.checkNotNull;
 import static com.google.common.collect.Iterables.getOnlyElement;
 import static com.google.gerrit.server.git.QueueProvider.QueueType.INTERACTIVE;
-import static com.google.gerrit.server.index.ChangeField.CHANGE;
-import static com.google.gerrit.server.index.ChangeField.LEGACY_ID;
-import static com.google.gerrit.server.index.ChangeField.PROJECT;
-import static com.google.gerrit.server.index.IndexRewriter.CLOSED_STATUSES;
-import static com.google.gerrit.server.index.IndexRewriter.OPEN_STATUSES;
+import static com.google.gerrit.server.index.change.ChangeField.CHANGE;
+import static com.google.gerrit.server.index.change.ChangeField.LEGACY_ID;
+import static com.google.gerrit.server.index.change.ChangeField.PROJECT;
+import static com.google.gerrit.server.index.change.IndexRewriter.CLOSED_STATUSES;
+import static com.google.gerrit.server.index.change.IndexRewriter.OPEN_STATUSES;
 import static java.util.concurrent.TimeUnit.MILLISECONDS;
 import static java.util.concurrent.TimeUnit.MINUTES;
 
@@ -32,7 +32,6 @@ import com.google.common.collect.Sets;
 import com.google.common.util.concurrent.Futures;
 import com.google.common.util.concurrent.ListenableFuture;
 import com.google.common.util.concurrent.ListeningExecutorService;
-import com.google.gerrit.common.Nullable;
 import com.google.gerrit.reviewdb.client.Account;
 import com.google.gerrit.reviewdb.client.Change;
 import com.google.gerrit.reviewdb.client.PatchSet;
@@ -41,23 +40,23 @@ import com.google.gerrit.reviewdb.server.ReviewDb;
 import com.google.gerrit.server.config.ConfigUtil;
 import com.google.gerrit.server.config.GerritServerConfig;
 import com.google.gerrit.server.config.SitePaths;
-import com.google.gerrit.server.index.ChangeField;
-import com.google.gerrit.server.index.ChangeField.ChangeProtoField;
-import com.google.gerrit.server.index.ChangeField.PatchSetApprovalProtoField;
-import com.google.gerrit.server.index.ChangeField.PatchSetProtoField;
-import com.google.gerrit.server.index.ChangeIndex;
 import com.google.gerrit.server.index.FieldDef;
 import com.google.gerrit.server.index.FieldDef.FillArgs;
 import com.google.gerrit.server.index.FieldType;
 import com.google.gerrit.server.index.IndexExecutor;
-import com.google.gerrit.server.index.IndexRewriter;
+import com.google.gerrit.server.index.QueryOptions;
 import com.google.gerrit.server.index.Schema;
 import com.google.gerrit.server.index.Schema.Values;
+import com.google.gerrit.server.index.change.ChangeField;
+import com.google.gerrit.server.index.change.ChangeField.ChangeProtoField;
+import com.google.gerrit.server.index.change.ChangeField.PatchSetApprovalProtoField;
+import com.google.gerrit.server.index.change.ChangeField.PatchSetProtoField;
+import com.google.gerrit.server.index.change.ChangeIndex;
+import com.google.gerrit.server.index.change.IndexRewriter;
 import com.google.gerrit.server.query.Predicate;
 import com.google.gerrit.server.query.QueryParseException;
 import com.google.gerrit.server.query.change.ChangeData;
 import com.google.gerrit.server.query.change.ChangeDataSource;
-import com.google.gerrit.server.query.change.QueryOptions;
 import com.google.gwtorm.protobuf.ProtobufCodec;
 import com.google.gwtorm.server.OrmException;
 import com.google.gwtorm.server.ResultSet;
@@ -101,7 +100,6 @@ import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.sql.Timestamp;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -159,7 +157,7 @@ public class LuceneChangeIndex implements ChangeIndex {
   }
 
   static interface Factory {
-    LuceneChangeIndex create(Schema<ChangeData> schema, String base);
+    LuceneChangeIndex create(Schema<ChangeData> schema);
   }
 
   static class GerritIndexWriterConfig {
@@ -216,8 +214,7 @@ public class LuceneChangeIndex implements ChangeIndex {
       Provider<ReviewDb> db,
       ChangeData.Factory changeDataFactory,
       FillArgs fillArgs,
-      @Assisted Schema<ChangeData> schema,
-      @Assisted @Nullable String base) throws IOException {
+      @Assisted Schema<ChangeData> schema) throws IOException {
     this.sitePaths = sitePaths;
     this.fillArgs = fillArgs;
     this.executor = executor;
@@ -245,8 +242,7 @@ public class LuceneChangeIndex implements ChangeIndex {
       closedIndex = new SubIndex(new RAMDirectory(), "ramClosed", closedConfig,
           searcherFactory);
     } else {
-      Path dir = base != null ? Paths.get(base)
-          : LuceneVersionManager.getDir(sitePaths, schema);
+      Path dir = LuceneVersionManager.getDir(sitePaths, schema);
       openIndex = new SubIndex(dir.resolve(CHANGES_OPEN), openConfig,
           searcherFactory);
       closedIndex = new SubIndex(dir.resolve(CHANGES_CLOSED), closedConfig,
