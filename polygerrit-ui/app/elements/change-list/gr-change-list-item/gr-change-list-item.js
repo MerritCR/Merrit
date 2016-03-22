@@ -52,24 +52,27 @@
     },
 
     _computeChangeStatusString: function(change) {
+      // "Closed" states should take precedence over "open" ones.
       if (change.status == this.ChangeStatus.MERGED) {
         return 'Merged';
       }
+      if (change.status == this.ChangeStatus.ABANDONED) {
+        return 'Abandoned';
+      }
+
       if (change.mergeable != null && change.mergeable == false) {
         return 'Merge Conflict';
       }
       if (change.status == this.ChangeStatus.DRAFT) {
         return 'Draft';
       }
-      if (change.status == this.ChangeStatus.ABANDONED) {
-        return 'Abandoned';
-      }
+
       return '';
     },
 
     _computeLabelTitle: function(change, labelName) {
       var label = change.labels[labelName];
-      if (!label) { return labelName; }
+      if (!label) { return 'Label not applicable'; }
       var significantLabel = label.rejected || label.approved ||
           label.disliked || label.recommended;
       if (significantLabel && significantLabel.name) {
@@ -99,6 +102,8 @@
         if (label.rejected) {
           classes['u-red'] = true;
         }
+      } else {
+        classes['u-gray-background'] = true;
       }
       return Object.keys(classes).sort().join(' ');
     },
