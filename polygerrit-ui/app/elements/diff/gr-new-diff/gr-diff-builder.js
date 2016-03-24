@@ -14,11 +14,13 @@
 (function(window, GrDiffGroup, GrDiffLine) {
   'use strict';
 
-  function GrDiffBuilder(diff, prefs, outputEl) {
+  function GrDiffBuilder(diff, comments, prefs, outputEl) {
+    this._comments = comments;
     this._prefs = prefs;
     this._outputEl = outputEl;
     this._groups = [];
 
+    this._commentLocations = this._getCommentLocations(comments);
     this._processContent(diff.content, this._groups, prefs.context);
   }
 
@@ -36,6 +38,11 @@
     ADDED: 'b',
     BOTH: 'ab',
     REMOVED: 'a',
+  };
+
+  GrDiffBuilder.Side = {
+    LEFT: 'left',
+    RIGHT: 'right',
   };
 
   GrDiffBuilder.prototype.emitDiff = function() {
@@ -56,7 +63,7 @@
       left: 0,
       right: 0,
     };
-
+    content = this._splitCommonGroupsWithComments(content, lineNums);
     for (var i = 0; i < content.length; i++) {
       var group = content[i];
       var lines = [];
@@ -92,9 +99,71 @@
     }
   };
 
+  GrDiffBuilder.prototype._getCommentLocations = function(comments) {
+    var result = {
+      left: {},
+      right: {},
+    };
+    for (var side in comments) {
+      if (side !== GrDiffBuilder.Side.LEFT &&
+          side !== GrDiffBuilder.Side.RIGHT) {
+        throw Error('Invalid side: ' + side);
+      }
+      comments[side].forEach(function(c) {
+        result[side][c.line] = true;
+      });
+    }
+    return result;
+  };
+
+  GrDiffBuilder.prototype._commentIsAtLineNum = function(side, lineNum) {
+    return this._commentLocations[side][lineNum] === true;
+  };
+
+  // In order to show comments out of the bounds of the selected context,
+  // treat them as separate chunks within the model so that the content (and
+  // context surrounding it) renders correctly.
+  GrDiffBuilder.prototype._splitCommonGroupsWithComments = function(content,
+      lineNums) {
+    var result = [];
+    var leftLineNum = lineNums.left;
+    var rightLineNum = lineNums.right;
+    for (var i = 0; i < content.length; i++) {
+      if (!content[i].ab) {
+        result.push(content[i]);
+        if (content[i].a) {
+          leftLineNum += content[i].a.length;
+        }
+        if (content[i].b) {
+          rightLineNum += content[i].b.length;
+        }
+        continue;
+      }
+      var chunk = content[i].ab;
+      var currentChunk = {ab: []};
+      for (var j = 0; j < chunk.length; j++) {
+        leftLineNum++;
+        rightLineNum++;
+        if (this._commentIsAtLineNum(GrDiffBuilder.Side.LEFT, leftLineNum) ||
+            this._commentIsAtLineNum(GrDiffBuilder.Side.RIGHT, rightLineNum)) {
+          if (currentChunk.ab && currentChunk.ab.length > 0) {
+            result.push(currentChunk);
+            currentChunk = {ab: []};
+          }
+          result.push({ab: [chunk[j]]});
+        } else {
+          currentChunk.ab.push(chunk[j]);
+        }
+      }
+      if (currentChunk.ab != null && currentChunk.ab.length > 0) {
+        result.push(currentChunk);
+      }
+    }
+    return result;
+  };
+
   GrDiffBuilder.prototype._insertContextGroups = function(groups, lines,
       hiddenRange) {
-    // TODO: Split around comments as well.
     var linesBeforeCtx = lines.slice(0, hiddenRange[0]);
     var hiddenLines = lines.slice(hiddenRange[0], hiddenRange[1]);
     var linesAfterCtx = lines.slice(hiddenRange[1]);
@@ -165,6 +234,40 @@
     });
     td.appendChild(button);
     return td;
+  };
+
+  GrDiffBuilder.prototype._getCommentsForLine = function(comments, line,
+      opt_side) {
+    var leftComments = comments[GrDiffBuilder.Side.LEFT].filter(
+        function(c) { return c.line === line.beforeNumber; });
+    var rightComments = comments[GrDiffBuilder.Side.RIGHT].filter(
+        function(c) { return c.line === line.afterNumber; });
+
+    var result;
+
+    switch (opt_side) {
+      case GrDiffBuilder.Side.LEFT:
+        result = leftComments;
+        break;
+      case GrDiffBuilder.Side.RIGHT:
+        result = rightComments;
+        break;
+      default:
+        result = leftComments.concat(rightComments);
+        break;
+    }
+
+    return result;
+  };
+
+  GrDiffBuilder.prototype._createCommentThread = function(line, opt_side) {
+    var comments = this._getCommentsForLine(this._comments, line, opt_side);
+    if (!comments || comments.length === 0) {
+      return null;
+    }
+    var threadEl = document.createElement('gr-diff-comment-thread');
+    threadEl.comments = comments;
+    return threadEl;
   };
 
   GrDiffBuilder.prototype._createLineEl = function(line, number, type) {
