@@ -11,30 +11,18 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-(function(window) {
-  'use strict';
 
-  function GrDiffLine(type) {
-    this.type = type;
-    this.contextLines = [];
+package com.google.gerrit.server.notedb;
+
+enum NoteDbTable {
+  CHANGES;
+
+  String key() {
+    return name().toLowerCase();
   }
 
-  GrDiffLine.prototype.beforeNumber = 0;
-
-  GrDiffLine.prototype.afterNumber = 0;
-
-  GrDiffLine.prototype.text = '';
-
-  GrDiffLine.Type = {
-    ADD: 'add',
-    BOTH: 'both',
-    BLANK: 'blank',
-    CONTEXT_CONTROL: 'contextControl',
-    REMOVE: 'remove',
-  };
-
-  GrDiffLine.BLANK_LINE = new GrDiffLine(GrDiffLine.Type.BLANK);
-
-  window.GrDiffLine = GrDiffLine;
-
-})(window);
+  @Override
+  public String toString() {
+    return key();
+  }
+}

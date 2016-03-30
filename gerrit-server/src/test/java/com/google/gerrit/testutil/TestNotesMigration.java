@@ -46,4 +46,22 @@ public class TestNotesMigration extends NotesMigration {
   public TestNotesMigration setAllEnabled(boolean enabled) {
     return setReadChanges(enabled).setWriteChanges(enabled);
   }
+
+  public TestNotesMigration setFromEnv() {
+    switch (NoteDbMode.get()) {
+      case READ_WRITE:
+        setWriteChanges(true);
+        setReadChanges(true);
+        break;
+      case WRITE:
+        setWriteChanges(true);
+        setReadChanges(false);
+        break;
+      case CHECK:
+      case OFF:
+      default:
+        break;
+    }
+    return this;
+  }
 }

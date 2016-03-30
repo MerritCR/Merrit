@@ -26,10 +26,6 @@
      */
 
     properties: {
-      prefs: {
-        type: Object,
-        notify: true,
-      },
       /**
        * URL params passed from the router.
        */
@@ -71,16 +67,14 @@
       Gerrit.RESTClientBehavior,
     ],
 
-    ready: function() {
-      app.accountReady.then(function() {
-        this._loggedIn = app.loggedIn;
-        if (this._loggedIn) {
+    attached: function() {
+      this._getLoggedIn().then(function(loggedIn) {
+        this._loggedIn = loggedIn;
+        if (loggedIn) {
           this._setReviewed(true);
         }
       }.bind(this));
-    },
 
-    attached: function() {
       if (this._path) {
         this.fire('title-change',
             {title: this._computeFileDisplayName(this._path)});
@@ -90,6 +84,10 @@
 
     detached: function() {
       window.removeEventListener('resize', this._boundWindowResizeHandler);
+    },
+
+    _getLoggedIn: function() {
+      return this.$.restAPI.getLoggedIn();
     },
 
     _handleReviewedChange: function(e) {

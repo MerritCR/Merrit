@@ -65,9 +65,16 @@ limitations under the License.
 
       builder._processContent(content, groups, -1);
 
-      assert.equal(groups.length, 3);
+      assert.equal(groups.length, 4);
 
       var group = groups[0];
+      assert.equal(group.type, GrDiffGroup.Type.BOTH);
+      assert.equal(group.lines.length, 1);
+      assert.equal(group.lines[0].text, '');
+      assert.equal(group.lines[0].beforeNumber, GrDiffLine.FILE);
+      assert.equal(group.lines[0].afterNumber, GrDiffLine.FILE);
+
+      group = groups[1];
       assert.equal(group.type, GrDiffGroup.Type.BOTH);
       assert.equal(group.lines.length, 2);
       assert.equal(group.lines.length, 2);
@@ -83,7 +90,7 @@ limitations under the License.
         '<meta charset="utf-8">',
       ]);
 
-      group = groups[1];
+      group = groups[2];
       assert.equal(group.type, GrDiffGroup.Type.DELTA);
       assert.equal(group.lines.length, 3);
       assert.equal(group.adds.length, 1);
@@ -98,7 +105,7 @@ limitations under the License.
         '  Hello, world!',
       ]);
 
-      group = groups[2];
+      group = groups[3];
       assert.equal(group.type, GrDiffGroup.Type.BOTH);
       assert.equal(group.lines.length, 3);
       assert.deepEqual(group.lines.map(beforeNumberFn), [5, 6, 7]);
@@ -130,44 +137,50 @@ limitations under the License.
 
       builder._processContent(content, groups, context);
 
-      assert.equal(groups[0].type, GrDiffGroup.Type.CONTEXT_CONTROL);
-      assert.equal(groups[0].lines[0].contextLines.length, 90);
-      groups[0].lines[0].contextLines.forEach(function(l) {
+      assert.equal(groups[0].type, GrDiffGroup.Type.BOTH);
+      assert.equal(groups[0].lines.length, 1);
+      assert.equal(groups[0].lines[0].text, '');
+      assert.equal(groups[0].lines[0].beforeNumber, GrDiffLine.FILE);
+      assert.equal(groups[0].lines[0].afterNumber, GrDiffLine.FILE);
+
+      assert.equal(groups[1].type, GrDiffGroup.Type.CONTEXT_CONTROL);
+      assert.equal(groups[1].lines[0].contextLines.length, 90);
+      groups[1].lines[0].contextLines.forEach(function(l) {
         assert.equal(l.text, content[0].ab[0]);
       });
 
-      assert.equal(groups[1].type, GrDiffGroup.Type.BOTH);
-      assert.equal(groups[1].lines.length, context);
-      groups[1].lines.forEach(function(l) {
+      assert.equal(groups[2].type, GrDiffGroup.Type.BOTH);
+      assert.equal(groups[2].lines.length, context);
+      groups[2].lines.forEach(function(l) {
         assert.equal(l.text, content[0].ab[0]);
       });
 
-      assert.equal(groups[2].type, GrDiffGroup.Type.DELTA);
-      assert.equal(groups[2].lines.length, 1);
-      assert.equal(groups[2].removes.length, 1);
-      assert.equal(groups[2].removes[0].text,
+      assert.equal(groups[3].type, GrDiffGroup.Type.DELTA);
+      assert.equal(groups[3].lines.length, 1);
+      assert.equal(groups[3].removes.length, 1);
+      assert.equal(groups[3].removes[0].text,
           'all work and no play make andybons a dull boy');
 
-      assert.equal(groups[3].type, GrDiffGroup.Type.BOTH);
-      assert.equal(groups[3].lines.length, 5);
-      groups[3].lines.forEach(function(l) {
+      assert.equal(groups[4].type, GrDiffGroup.Type.BOTH);
+      assert.equal(groups[4].lines.length, 5);
+      groups[4].lines.forEach(function(l) {
         assert.equal(l.text, content[2].ab[0]);
       });
 
-      assert.equal(groups[4].type, GrDiffGroup.Type.DELTA);
-      assert.equal(groups[4].lines.length, 1);
-      assert.equal(groups[4].adds.length, 1);
-      assert.equal(groups[4].adds[0].text, 'elgoog elgoog elgoog');
+      assert.equal(groups[5].type, GrDiffGroup.Type.DELTA);
+      assert.equal(groups[5].lines.length, 1);
+      assert.equal(groups[5].adds.length, 1);
+      assert.equal(groups[5].adds[0].text, 'elgoog elgoog elgoog');
 
-      assert.equal(groups[5].type, GrDiffGroup.Type.BOTH);
-      assert.equal(groups[5].lines.length, context);
-      groups[5].lines.forEach(function(l) {
+      assert.equal(groups[6].type, GrDiffGroup.Type.BOTH);
+      assert.equal(groups[6].lines.length, context);
+      groups[6].lines.forEach(function(l) {
         assert.equal(l.text, content[4].ab[0]);
       });
 
-      assert.equal(groups[6].type, GrDiffGroup.Type.CONTEXT_CONTROL);
-      assert.equal(groups[6].lines[0].contextLines.length, 90);
-      groups[6].lines[0].contextLines.forEach(function(l) {
+      assert.equal(groups[7].type, GrDiffGroup.Type.CONTEXT_CONTROL);
+      assert.equal(groups[7].lines[0].contextLines.length, 90);
+      groups[7].lines[0].contextLines.forEach(function(l) {
         assert.equal(l.text, content[4].ab[0]);
       });
 
@@ -183,34 +196,40 @@ limitations under the License.
 
       builder._processContent(content, groups, 10);
 
-      assert.equal(groups[0].type, GrDiffGroup.Type.DELTA);
+      assert.equal(groups[0].type, GrDiffGroup.Type.BOTH);
       assert.equal(groups[0].lines.length, 1);
-      assert.equal(groups[0].removes.length, 1);
-      assert.equal(groups[0].removes[0].text,
+      assert.equal(groups[0].lines[0].text, '');
+      assert.equal(groups[0].lines[0].beforeNumber, GrDiffLine.FILE);
+      assert.equal(groups[0].lines[0].afterNumber, GrDiffLine.FILE);
+
+      assert.equal(groups[1].type, GrDiffGroup.Type.DELTA);
+      assert.equal(groups[1].lines.length, 1);
+      assert.equal(groups[1].removes.length, 1);
+      assert.equal(groups[1].removes[0].text,
           'all work and no play make andybons a dull boy');
 
-      assert.equal(groups[1].type, GrDiffGroup.Type.BOTH);
-      assert.equal(groups[1].lines.length, context);
-      groups[1].lines.forEach(function(l) {
+      assert.equal(groups[2].type, GrDiffGroup.Type.BOTH);
+      assert.equal(groups[2].lines.length, context);
+      groups[2].lines.forEach(function(l) {
         assert.equal(l.text, content[1].ab[0]);
       });
 
-      assert.equal(groups[2].type, GrDiffGroup.Type.CONTEXT_CONTROL);
-      assert.equal(groups[2].lines[0].contextLines.length, 30);
-      groups[2].lines[0].contextLines.forEach(function(l) {
+      assert.equal(groups[3].type, GrDiffGroup.Type.CONTEXT_CONTROL);
+      assert.equal(groups[3].lines[0].contextLines.length, 30);
+      groups[3].lines[0].contextLines.forEach(function(l) {
         assert.equal(l.text, content[1].ab[0]);
       });
 
-      assert.equal(groups[3].type, GrDiffGroup.Type.BOTH);
-      assert.equal(groups[3].lines.length, context);
-      groups[3].lines.forEach(function(l) {
+      assert.equal(groups[4].type, GrDiffGroup.Type.BOTH);
+      assert.equal(groups[4].lines.length, context);
+      groups[4].lines.forEach(function(l) {
         assert.equal(l.text, content[1].ab[0]);
       });
 
-      assert.equal(groups[4].type, GrDiffGroup.Type.DELTA);
-      assert.equal(groups[4].lines.length, 1);
-      assert.equal(groups[4].adds.length, 1);
-      assert.equal(groups[4].adds[0].text, 'elgoog elgoog elgoog');
+      assert.equal(groups[5].type, GrDiffGroup.Type.DELTA);
+      assert.equal(groups[5].lines.length, 1);
+      assert.equal(groups[5].adds.length, 1);
+      assert.equal(groups[5].adds[0].text, 'elgoog elgoog elgoog');
     });
 
     test('newlines', function() {
@@ -284,6 +303,77 @@ limitations under the License.
           GrDiffBuilder.Side.RIGHT), [{id: 'r5', line: 5}]);
     });
 
+    test('comment thread creation', function() {
+      builder._comments = {
+        meta: {
+          changeNum: '42',
+          patchRange: {
+            basePatchNum: 'PARENT',
+            patchNum: '3',
+          },
+          path: '/path/to/foo',
+          projectConfig: {foo: 'bar'},
+        },
+        left: [
+          {id: 'l3', line: 3},
+          {id: 'l5', line: 5},
+        ],
+        right: [
+          {id: 'r5', line: 5},
+        ],
+      };
+
+      function checkThreadProps(patchNum, side, comments) {
+        assert.equal(threadEl.changeNum, '42');
+        assert.equal(threadEl.patchNum, patchNum);
+        assert.equal(threadEl.path, '/path/to/foo');
+        assert.equal(threadEl.side, side);
+        assert.deepEqual(threadEl.projectConfig, {foo: 'bar'});
+        assert.deepEqual(threadEl.comments, comments);
+      }
+
+      var line = new GrDiffLine(GrDiffLine.Type.BOTH);
+      line.beforeNumber = 5;
+      line.afterNumber = 5;
+      threadEl = builder._commentThreadForLine(line);
+      checkThreadProps('3', 'REVISION',
+          [{id: 'l5', line: 5}, {id: 'r5', line: 5}]);
+
+      threadEl = builder._commentThreadForLine(line, GrDiffBuilder.Side.RIGHT);
+      checkThreadProps('3', 'REVISION', [{id: 'r5', line: 5}]);
+
+      threadEl = builder._commentThreadForLine(line, GrDiffBuilder.Side.LEFT);
+      checkThreadProps('3', 'PARENT', [{id: 'l5', line: 5}]);
+
+      builder._comments.meta.patchRange.basePatchNum = '1';
+
+      threadEl = builder._commentThreadForLine(line);
+      checkThreadProps('3', 'REVISION',
+          [{id: 'l5', line: 5}, {id: 'r5', line: 5}]);
+
+      threadEl = builder._commentThreadForLine(line, GrDiffBuilder.Side.LEFT);
+      checkThreadProps('1', 'REVISION', [{id: 'l5', line: 5}]);
+
+      threadEl = builder._commentThreadForLine(line, GrDiffBuilder.Side.RIGHT);
+      checkThreadProps('3', 'REVISION', [{id: 'r5', line: 5}]);
+
+      builder._comments.meta.patchRange.basePatchNum = 'PARENT';
+
+      line = new GrDiffLine(GrDiffLine.Type.REMOVE);
+      line.beforeNumber = 5;
+      line.afterNumber = 5;
+      threadEl = builder._commentThreadForLine(line);
+      checkThreadProps('3', 'PARENT',
+          [{id: 'l5', line: 5}, {id: 'r5', line: 5}]);
+
+      line = new GrDiffLine(GrDiffLine.Type.ADD);
+      line.beforeNumber = 3;
+      line.afterNumber = 5;
+      threadEl = builder._commentThreadForLine(line);
+      checkThreadProps('3', 'REVISION',
+          [{id: 'l3', line: 3}, {id: 'r5', line: 5}]);
+    });
+
     test('break up common diff chunks', function() {
       builder._commentLocations = {
         left: {1: true},
@@ -338,6 +428,87 @@ limitations under the License.
             'either express or implied. See the License for the specific ',
             'language governing permissions and limitations under the License.',
           ]
+        }
+      ]);
+    });
+
+    test('intraline normalization', function() {
+      // The content and highlights are in the format returned by the Gerrit
+      // REST API.
+      var content = [
+        '      <section class="summary">',
+        '        <gr-linked-text content="' +
+            '[[_computeCurrentRevisionMessage(change)]]"></gr-linked-text>',
+        '      </section>',
+      ];
+      var highlights = [
+        [31, 34], [42, 26]
+      ];
+      var results = GrDiffBuilder.prototype._normalizeIntralineHighlights(
+          content, highlights);
+      assert.deepEqual(results, [
+        {
+          contentIndex: 0,
+          startIndex: 31,
+        },
+        {
+          contentIndex: 1,
+          startIndex: 0,
+          endIndex: 33,
+        },
+        {
+          contentIndex: 1,
+          startIndex: 75,
+        },
+        {
+          contentIndex: 2,
+          startIndex: 0,
+          endIndex: 6,
+        }
+      ]);
+
+      content = [
+        '        this._path = value.path;',
+        '',
+        '        // When navigating away from the page, there is a possibility that the',
+        '        // patch number is no longer a part of the URL (say when navigating to',
+        '        // the top-level change info view) and therefore undefined in `params`.',
+        '        if (!this._patchRange.patchNum) {',
+      ];
+      highlights = [
+        [14, 17],
+        [11, 70],
+        [12, 67],
+        [12, 67],
+        [14, 29],
+      ];
+      results = GrDiffBuilder.prototype._normalizeIntralineHighlights(content,
+          highlights);
+      assert.deepEqual(results, [
+        {
+          contentIndex: 0,
+          startIndex: 14,
+          endIndex: 31,
+        },
+        {
+          contentIndex: 2,
+          startIndex: 8,
+          endIndex: 78,
+        },
+        {
+          contentIndex: 3,
+          startIndex: 11,
+          endIndex: 78,
+        },
+        {
+          contentIndex: 4,
+          startIndex: 11,
+          endIndex: 78,
+        },
+        {
+          contentIndex: 5,
+          startIndex: 12,
+          endIndex: 41,
         }
       ]);
     });

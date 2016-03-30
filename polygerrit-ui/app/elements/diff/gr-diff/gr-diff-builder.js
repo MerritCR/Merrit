@@ -32,12 +32,17 @@
   GrDiffBuilder.TAB_REGEX = /\t/g;
 
   GrDiffBuilder.LINE_FEED_HTML =
-      '<span class="style-scope gr-new-diff br"></span>';
+      '<span class="style-scope gr-diff br"></span>';
 
   GrDiffBuilder.GroupType = {
     ADDED: 'b',
     BOTH: 'ab',
     REMOVED: 'a',
+  };
+
+  GrDiffBuilder.Highlights = {
+    ADDED: 'edit_b',
+    REMOVED: 'edit_a',
   };
 
   GrDiffBuilder.Side = {
@@ -56,6 +61,8 @@
   },
 
   GrDiffBuilder.prototype._processContent = function(content, groups, context) {
+    this._appendFileComments(groups);
+
     var WHOLE_FILE = -1;
     context = content.length > 1 ? context : WHOLE_FILE;
 
@@ -88,15 +95,35 @@
       }
 
       if (group[GrDiffBuilder.GroupType.REMOVED] !== undefined) {
+        var highlights = undefined;
+        if (group[GrDiffBuilder.Highlights.REMOVED] !== undefined) {
+          highlights = this._normalizeIntralineHighlights(
+              group[GrDiffBuilder.GroupType.REMOVED],
+              group[GrDiffBuilder.Highlights.REMOVED]);
+        }
         this._appendRemovedLines(group[GrDiffBuilder.GroupType.REMOVED], lines,
-            lineNums);
+            lineNums, highlights);
       }
+
       if (group[GrDiffBuilder.GroupType.ADDED] !== undefined) {
+        var highlights = undefined;
+        if (group[GrDiffBuilder.Highlights.ADDED] !== undefined) {
+          highlights = this._normalizeIntralineHighlights(
+            group[GrDiffBuilder.GroupType.ADDED],
+            group[GrDiffBuilder.Highlights.ADDED]);
+        }
         this._appendAddedLines(group[GrDiffBuilder.GroupType.ADDED], lines,
-            lineNums);
+            lineNums, highlights);
       }
       groups.push(new GrDiffGroup(GrDiffGroup.Type.DELTA, lines));
     }
+  };
+
+  GrDiffBuilder.prototype._appendFileComments = function(groups) {
+    var line = new GrDiffLine(GrDiffLine.Type.BOTH);
+    line.beforeNumber = GrDiffLine.FILE;
+    line.afterNumber = GrDiffLine.FILE;
+    groups.push(new GrDiffGroup(GrDiffGroup.Type.BOTH, [line]));
   };
 
   GrDiffBuilder.prototype._getCommentLocations = function(comments) {
@@ -107,10 +134,10 @@
     for (var side in comments) {
       if (side !== GrDiffBuilder.Side.LEFT &&
           side !== GrDiffBuilder.Side.RIGHT) {
-        throw Error('Invalid side: ' + side);
+        continue;
       }
       comments[side].forEach(function(c) {
-        result[side][c.line] = true;
+        result[side][c.line || GrDiffLine.FILE] = true;
       });
     }
     return result;
@@ -162,6 +189,66 @@
     return result;
   };
 
+  // The `highlights` array consists of a list of <skip length, mark length>
+  // pairs, where the skip length is the number of characters between the
+  // end of the previous edit and the start of this edit, and the mark
+  // length is the number of edited characters following the skip. The start
+  // of the edits is from the beginning of the related diff content lines.
+  //
+  // Note that the implied newline character at the end of each line is
+  // included in the length calculation, and thus it is possible for the
+  // edits to span newlines.
+  //
+  // A line highlight object consists of three fields:
+  // - contentIndex: The index of the diffChunk `content` field (the line
+  //   being referred to).
+  // - startIndex: Where the highlight should begin.
+  // - endIndex: (optional) Where the highlight should end. If omitted, the
+  //   highlight is meant to be a continuation onto the next line.
+  GrDiffBuilder.prototype._normalizeIntralineHighlights = function(content,
+      highlights) {
+    var contentIndex = 0;
+    var idx = 0;
+    var normalized = [];
+    for (var i = 0; i < highlights.length; i++) {
+      var line = content[contentIndex] + '\n';
+      var hl = highlights[i];
+      var j = 0;
+      while (j < hl[0]) {
+        if (idx === line.length) {
+          idx = 0;
+          line = content[++contentIndex] + '\n';
+          continue;
+        }
+        idx++;
+        j++;
+      }
+      var lineHighlight = {
+        contentIndex: contentIndex,
+        startIndex: idx,
+      };
+
+      j = 0;
+      while (line && j < hl[1]) {
+        if (idx === line.length) {
+          idx = 0;
+          line = content[++contentIndex] + '\n';
+          normalized.push(lineHighlight);
+          lineHighlight = {
+            contentIndex: contentIndex,
+            startIndex: idx,
+          };
+          continue;
+        }
+        idx++;
+        j++;
+      }
+      lineHighlight.endIndex = idx;
+      normalized.push(lineHighlight);
+    }
+    return normalized;
+  };
+
   GrDiffBuilder.prototype._insertContextGroups = function(groups, lines,
       hiddenRange) {
     var linesBeforeCtx = lines.slice(0, hiddenRange[0]);
@@ -192,21 +279,32 @@
     }
   };
 
-  GrDiffBuilder.prototype._appendRemovedLines = function(rows, lines,
-      lineNums) {
+  GrDiffBuilder.prototype._appendRemovedLines = function(rows, lines, lineNums,
+      opt_highlights) {
     for (var i = 0; i < rows.length; i++) {
       var line = new GrDiffLine(GrDiffLine.Type.REMOVE);
       line.text = rows[i];
       line.beforeNumber = ++lineNums.left;
+      if (opt_highlights) {
+        line.highlights = opt_highlights.filter(function(hl) {
+          return hl.contentIndex === i;
+        });
+      }
       lines.push(line);
     }
   };
 
-  GrDiffBuilder.prototype._appendAddedLines = function(rows, lines, lineNums) {
+  GrDiffBuilder.prototype._appendAddedLines = function(rows, lines, lineNums,
+      opt_highlights) {
     for (var i = 0; i < rows.length; i++) {
       var line = new GrDiffLine(GrDiffLine.Type.ADD);
       line.text = rows[i];
       line.afterNumber = ++lineNums.right;
+      if (opt_highlights) {
+        line.highlights = opt_highlights.filter(function(hl) {
+          return hl.contentIndex === i;
+        });
+      }
       lines.push(line);
     }
   };
@@ -238,10 +336,16 @@
 
   GrDiffBuilder.prototype._getCommentsForLine = function(comments, line,
       opt_side) {
-    var leftComments = comments[GrDiffBuilder.Side.LEFT].filter(
-        function(c) { return c.line === line.beforeNumber; });
-    var rightComments = comments[GrDiffBuilder.Side.RIGHT].filter(
-        function(c) { return c.line === line.afterNumber; });
+    function byLineNum(lineNum) {
+      return function(c) {
+        return (c.line === lineNum) ||
+               (c.line === undefined && lineNum === GrDiffLine.FILE)
+      }
+    }
+    var leftComments =
+        comments[GrDiffBuilder.Side.LEFT].filter(byLineNum(line.beforeNumber));
+    var rightComments =
+        comments[GrDiffBuilder.Side.RIGHT].filter(byLineNum(line.afterNumber));
 
     var result;
 
@@ -260,23 +364,52 @@
     return result;
   };
 
-  GrDiffBuilder.prototype._createCommentThread = function(line, opt_side) {
+  GrDiffBuilder.prototype.createCommentThread = function(changeNum, patchNum,
+      path, side, projectConfig) {
+    var threadEl = document.createElement('gr-diff-comment-thread');
+    threadEl.changeNum = changeNum;
+    threadEl.patchNum = patchNum;
+    threadEl.path = path;
+    threadEl.side = side;
+    threadEl.projectConfig = projectConfig;
+    return threadEl;
+  },
+
+  GrDiffBuilder.prototype._commentThreadForLine = function(line, opt_side) {
     var comments = this._getCommentsForLine(this._comments, line, opt_side);
     if (!comments || comments.length === 0) {
       return null;
     }
-    var threadEl = document.createElement('gr-diff-comment-thread');
+
+    var patchNum = this._comments.meta.patchRange.patchNum;
+    var side = 'REVISION';
+    if (line.type === GrDiffLine.Type.REMOVE ||
+        opt_side === GrDiffBuilder.Side.LEFT) {
+      if (this._comments.meta.patchRange.basePatchNum === 'PARENT') {
+        side = 'PARENT';
+      } else {
+        patchNum = this._comments.meta.patchRange.basePatchNum;
+      }
+    }
+    var threadEl = this.createCommentThread(
+        this._comments.meta.changeNum,
+        patchNum,
+        this._comments.meta.path,
+        side,
+        this._comments.meta.projectConfig);
     threadEl.comments = comments;
     return threadEl;
   };
 
   GrDiffBuilder.prototype._createLineEl = function(line, number, type) {
-    var td = this._createElement('td', 'lineNum');
+    var td = this._createElement('td');
     if (line.type === GrDiffLine.Type.BLANK) {
       return td;
     } else if (line.type === GrDiffLine.Type.CONTEXT_CONTROL) {
+      td.classList.add('contextLineNum');
       td.setAttribute('data-value', '@@');
     } else if (line.type === GrDiffLine.Type.BOTH || line.type == type) {
+      td.classList.add('lineNum');
       td.setAttribute('data-value', number);
     }
     return td;
@@ -290,6 +423,14 @@
     td.classList.add(line.type);
     var text = line.text;
     var html = util.escapeHTML(text);
+
+    td.classList.add(line.highlights.length > 0 ?
+        'lightHighlight' : 'darkHighlight');
+
+    if (line.highlights.length > 0) {
+      html = this._addIntralineHighlights(text, html, line.highlights);
+    }
+
     if (text.length > this._prefs.line_length) {
       html = this._addNewlines(text, html);
     }
@@ -366,6 +507,41 @@
     return html.replace(GrDiffBuilder.TAB_REGEX, htmlStr);
   };
 
+  GrDiffBuilder.prototype._addIntralineHighlights = function(content, html,
+      highlights) {
+    var START_TAG = '<hl class="style-scope gr-diff">';
+    var END_TAG = '</hl>';
+
+    for (var i = 0; i < highlights.length; i++) {
+      var hl = highlights[i];
+
+      var htmlStartIndex = 0;
+      // Find the index of the HTML string to insert the start tag.
+      for (var j = 0; j < hl.startIndex; j++) {
+        htmlStartIndex = this._advanceChar(html, htmlStartIndex);
+      }
+
+      var htmlEndIndex = 0;
+      if (hl.endIndex !== undefined) {
+        for (var j = 0; j < hl.endIndex; j++) {
+          htmlEndIndex = this._advanceChar(html, htmlEndIndex);
+        }
+      } else {
+        // If endIndex isn't present, continue to the end of the line.
+        htmlEndIndex = html.length;
+      }
+      // The start and end indices could be the same if a highlight is meant
+      // to start at the end of a line and continue onto the next one.
+      // Ignore it.
+      if (htmlStartIndex !== htmlEndIndex) {
+        html = html.slice(0, htmlStartIndex) + START_TAG +
+              html.slice(htmlStartIndex, htmlEndIndex) + END_TAG +
+              html.slice(htmlEndIndex);
+      }
+    }
+    return html;
+  };
+
   GrDiffBuilder.prototype._getTabWrapper = function(tabSize, showTabs) {
     // Force this to be a number to prevent arbitrary injection.
     tabSize = +tabSize;
@@ -373,7 +549,7 @@
       throw Error('Invalid tab size from preferences.');
     }
 
-    var str = '<span class="style-scope gr-new-diff tab ';
+    var str = '<span class="style-scope gr-diff tab ';
     if (showTabs) {
       str += 'withIndicator';
     }
@@ -393,7 +569,7 @@
     // Since the Polymer DOM utility functions (which would do this
     // automatically) are not being used for performance reasons, this is
     // done manually.
-    el.classList.add('style-scope', 'gr-new-diff');
+    el.classList.add('style-scope', 'gr-diff');
     if (!!className) {
       el.classList.add(className);
     }

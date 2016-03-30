@@ -46,7 +46,6 @@ import com.google.gerrit.server.git.WorkQueue;
 import com.google.gerrit.server.index.DummyIndexModule;
 import com.google.gerrit.server.index.change.ReindexAfterUpdate;
 import com.google.gerrit.server.notedb.ChangeRebuilder;
-import com.google.gerrit.server.notedb.NoteDbModule;
 import com.google.gerrit.server.notedb.NotesMigration;
 import com.google.gerrit.server.schema.DisabledChangesReviewDbWrapper;
 import com.google.gwtorm.server.OrmException;
@@ -75,9 +74,9 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
-public class RebuildNotedb extends SiteProgram {
+public class RebuildNoteDb extends SiteProgram {
   private static final Logger log =
-      LoggerFactory.getLogger(RebuildNotedb.class);
+      LoggerFactory.getLogger(RebuildNoteDb.class);
 
   @Option(name = "--threads",
       usage = "Number of threads to use for rebuilding NoteDb")
@@ -121,14 +120,14 @@ public class RebuildNotedb extends SiteProgram {
     sysInjector = createSysInjector();
     sysInjector.injectMembers(this);
     if (!notesMigration.enabled()) {
-      die("Notedb is not enabled.");
+      die("NoteDb is not enabled.");
     }
     LifecycleManager sysManager = new LifecycleManager();
     sysManager.add(sysInjector);
     sysManager.start();
 
     ListeningExecutorService executor = newExecutor();
-    System.out.println("Rebuilding the notedb");
+    System.out.println("Rebuilding the NoteDb");
 
     Multimap<Project.NameKey, Change.Id> changesByProject =
         getChangesByProject();
@@ -171,7 +170,7 @@ public class RebuildNotedb extends SiteProgram {
                 }
               }));
         } catch (Exception e) {
-          log.error("Error rebuilding notedb", e);
+          log.error("Error rebuilding NoteDb", e);
           ok.set(false);
           break;
         }
@@ -215,7 +214,6 @@ public class RebuildNotedb extends SiteProgram {
       public void configure() {
         install(dbInjector.getInstance(BatchProgramModule.class));
         install(SearchingChangeCacheImpl.module());
-        install(new NoteDbModule());
         DynamicSet.bind(binder(), GitReferenceUpdatedListener.class).to(
             ReindexAfterUpdate.class);
         install(new DummyIndexModule());

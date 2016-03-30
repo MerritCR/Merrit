@@ -36,7 +36,7 @@ limitations under the License.
       }
     </style>
     <div id="container">
-      <template id="commentList" is="dom-repeat" items="{{_orderedComments}}" as="comment">
+      <template id="commentList" is="dom-repeat" items="[[_orderedComments]]" as="comment">
         <gr-diff-comment
             comment="{{comment}}"
             change-num="[[changeNum]]"
@@ -44,9 +44,8 @@ limitations under the License.
             draft="[[comment.__draft]]"
             show-actions="[[_showActions]]"
             project-config="[[projectConfig]]"
-            on-height-change="_handleCommentHeightChange"
             on-reply="_handleCommentReply"
-            on-discard="_handleCommentDiscard"
+            on-comment-discard="_handleCommentDiscard"
             on-done="_handleCommentDone"></gr-diff-comment>
       </template>
     </div>

@@ -18,15 +18,9 @@
     is: 'gr-diff-comment-thread',
 
     /**
-     * Fired when the height of the thread changes.
-     *
-     * @event height-change
-     */
-
-    /**
      * Fired when the thread should be discarded.
      *
-     * @event discard
+     * @event thread-discard
      */
 
     properties: {
@@ -38,13 +32,12 @@
       patchNum: String,
       path: String,
       projectConfig: Object,
+      side: {
+        type: String,
+        value: 'REVISION',
+      },
 
       _showActions: Boolean,
-      _boundWindowResizeHandler: {
-        type: Function,
-        value: function() { return this._handleWindowResize.bind(this); }
-      },
-      _lastHeight: Number,
       _orderedComments: Array,
     },
 
@@ -60,20 +53,22 @@
       this._getLoggedIn().then(function(loggedIn) {
         this._showActions = loggedIn;
       }.bind(this));
-
-      window.addEventListener('resize', this._boundWindowResizeHandler);
     },
 
-    detached: function() {
-      window.removeEventListener('resize', this._boundWindowResizeHandler);
+    addDraft: function(opt_lineNum) {
+      var lastComment = this.comments[this.comments.length - 1];
+      if (lastComment && lastComment.__draft) {
+        var commentEl = this._commentElWithDraftID(
+            lastComment.id || lastComment.__draftID);
+        commentEl.editing = true;
+        return;
+      }
+
+      this.push('comments', this._newDraft(opt_lineNum));
     },
 
     _getLoggedIn: function() {
       return this.$.restAPI.getLoggedIn();
-    },
-
-    _handleWindowResize: function(e) {
-      this._heightChanged();
     },
 
     _commentsChanged: function(changeRecord) {
@@ -117,11 +112,6 @@
       }
     },
 
-    _handleCommentHeightChange: function(e) {
-      e.stopPropagation();
-      this._heightChanged();
-    },
-
     _handleCommentReply: function(e) {
       var comment = e.detail.comment;
       var quoteStr;
@@ -130,62 +120,62 @@
         var quoteStr = msg.split('\n').map(
             function(line) { return ' > ' + line; }).join('\n') + '\n\n';
       }
-      var reply =
-          this._newReply(comment.id, comment.line, this.path, quoteStr);
+      var reply = this._newReply(comment.id, comment.line, quoteStr);
       this.push('comments', reply);
 
       // Allow the reply to render in the dom-repeat.
       this.async(function() {
         var commentEl = this._commentElWithDraftID(reply.__draftID);
         commentEl.editing = true;
-        this.async(this._heightChanged.bind(this), 1);
       }.bind(this), 1);
     },
 
     _handleCommentDone: function(e) {
       var comment = e.detail.comment;
-      var reply = this._newReply(comment.id, comment.line, this.path, 'Done');
+      var reply = this._newReply(comment.id, comment.line, 'Done');
       this.push('comments', reply);
 
       // Allow the reply to render in the dom-repeat.
       this.async(function() {
         var commentEl = this._commentElWithDraftID(reply.__draftID);
         commentEl.save();
-        this.async(this._heightChanged.bind(this), 1);
       }.bind(this), 1);
     },
 
-    _commentElWithDraftID: function(draftID) {
-      var commentEls =
-          Polymer.dom(this.root).querySelectorAll('gr-diff-comment');
-      for (var i = 0; i < commentEls.length; i++) {
-        if (commentEls[i].comment.__draftID == draftID) {
-          return commentEls[i];
+    _commentElWithDraftID: function(id) {
+      var els = Polymer.dom(this.root).querySelectorAll('gr-diff-comment');
+      for (var i = 0; i < els.length; i++) {
+        if (els[i].comment.id === id || els[i].comment.__draftID === id) {
+          return els[i];
         }
       }
       return null;
     },
 
-    _newReply: function(inReplyTo, line, path, opt_message) {
-      var c = {
+    _newReply: function(inReplyTo, opt_lineNum, opt_message) {
+      var d = this._newDraft(opt_lineNum);
+      d.in_reply_to = inReplyTo;
+      if (opt_message != null) {
+        d.message = opt_message;
+      }
+      return d;
+    },
+
+    _newDraft: function(opt_lineNum) {
+      var d = {
         __draft: true,
         __draftID: Math.random().toString(36),
         __date: new Date(),
-        line: line,
-        path: path,
-        in_reply_to: inReplyTo,
+        path: this.path,
+        side: this.side,
       };
-      if (opt_message != null) {
-        c.message = opt_message;
+      if (opt_lineNum) {
+        d.line = opt_lineNum;
       }
-      return c;
+      return d;
     },
 
     _handleCommentDiscard: function(e) {
-      // TODO(andybons): In Shadow DOM, the event bubbles up, while in Shady
-      // DOM, it respects the bubbles property.
-      // https://github.com/Polymer/polymer/issues/3226
-      e.stopPropagation();
       var diffCommentEl = Polymer.dom(e).rootTarget;
       var idx = this._indexOf(diffCommentEl.comment, this.comments);
       if (idx == -1) {
@@ -194,18 +184,9 @@
       }
       this.splice('comments', idx, 1);
       if (this.comments.length == 0) {
-        this.fire('discard', null, {bubbles: false});
+        this.fire('thread-discard');
         return;
       }
-      this.async(this._heightChanged.bind(this), 1);
-    },
-
-    _heightChanged: function() {
-      var height = this.$.container.offsetHeight;
-      if (height == this._lastHeight) { return; }
-
-      this.fire('height-change', {height: height}, {bubbles: false});
-      this._lastHeight = height;
     },
 
     _indexOf: function(comment, arr) {

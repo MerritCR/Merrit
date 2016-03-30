@@ -361,7 +361,7 @@ abstract class SubmitStrategyOp extends BatchUpdate.Op {
     PatchSet.Id psId = update.getPatchSetId();
     ctx.getDb().patchSetApprovals().upsert(
         convertPatchSet(normalized.getNormalized(), psId));
-    ctx.getDb().patchSetApprovals().update(
+    ctx.getDb().patchSetApprovals().upsert(
         zero(convertPatchSet(normalized.deleted(), psId)));
     for (PatchSetApproval psa : normalized.updated()) {
       update.putApprovalFor(psa.getAccountId(), psa.getLabel(), psa.getValue());
@@ -370,7 +370,7 @@ abstract class SubmitStrategyOp extends BatchUpdate.Op {
       update.removeApprovalFor(psa.getAccountId(), psa.getLabel());
     }
 
-    // TODO(dborowitz): Don't use a label in notedb; just check when status
+    // TODO(dborowitz): Don't use a label in NoteDb; just check when status
     // change happened.
     for (PatchSetApproval psa : normalized.unchanged()) {
       if (includeUnchanged || psa.isLegacySubmit()) {
