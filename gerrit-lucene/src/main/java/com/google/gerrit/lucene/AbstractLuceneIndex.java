@@ -16,6 +16,7 @@ package com.google.gerrit.lucene;
 
 import static java.util.concurrent.TimeUnit.MILLISECONDS;
 
+import com.google.common.base.Joiner;
 import com.google.common.collect.Sets;
 import com.google.common.util.concurrent.AbstractFuture;
 import com.google.common.util.concurrent.ListenableFuture;
@@ -47,7 +48,6 @@ import org.apache.lucene.search.SearcherFactory;
 import org.apache.lucene.store.AlreadyClosedException;
 import org.apache.lucene.store.Directory;
 import org.eclipse.jgit.errors.ConfigInvalidException;
-import org.eclipse.jgit.storage.file.FileBasedConfig;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -69,13 +69,11 @@ public abstract class AbstractLuceneIndex<K, V> implements Index<K, V> {
     return f.getName() + "_SORT";
   }
 
-  public static void setReady(SitePaths sitePaths, int version, boolean ready)
-      throws IOException {
+  public static void setReady(SitePaths sitePaths, String name, int version,
+      boolean ready) throws IOException {
     try {
-      // TODO(dborowitz): Totally broken for non-change indexes.
-      FileBasedConfig cfg =
-          LuceneVersionManager.loadGerritIndexConfig(sitePaths);
-      LuceneVersionManager.setReady(cfg, version, ready);
+      GerritIndexStatus cfg = new GerritIndexStatus(sitePaths);
+      cfg.setReady(name, version, ready);
       cfg.save();
     } catch (ConfigInvalidException e) {
       throw new IOException(e);
@@ -85,6 +83,7 @@ public abstract class AbstractLuceneIndex<K, V> implements Index<K, V> {
   private final Schema<V> schema;
   private final SitePaths sitePaths;
   private final Directory dir;
+  private final String name;
   private final TrackingIndexWriter writer;
   private final ReferenceManager<IndexSearcher> searcherManager;
   private final ControlledRealTimeReopenThread<IndexSearcher> reopenThread;
@@ -94,12 +93,15 @@ public abstract class AbstractLuceneIndex<K, V> implements Index<K, V> {
       Schema<V> schema,
       SitePaths sitePaths,
       Directory dir,
-      final String name,
+      String name,
+      String subIndex,
       GerritIndexWriterConfig writerConfig,
       SearcherFactory searcherFactory) throws IOException {
     this.schema = schema;
     this.sitePaths = sitePaths;
     this.dir = dir;
+    this.name = name;
+    final String index = Joiner.on('_').skipNulls().join(name, subIndex);
     IndexWriter delegateWriter;
     long commitPeriod = writerConfig.getCommitWithinMs();
 
@@ -114,7 +116,7 @@ public abstract class AbstractLuceneIndex<K, V> implements Index<K, V> {
       delegateWriter = autoCommitWriter;
 
       new ScheduledThreadPoolExecutor(1, new ThreadFactoryBuilder()
-          .setNameFormat("Commit-%d " + name)
+          .setNameFormat("Commit-%d " + index)
           .setDaemon(true)
           .build())
           .scheduleAtFixedRate(new Runnable() {
@@ -126,13 +128,13 @@ public abstract class AbstractLuceneIndex<K, V> implements Index<K, V> {
                   autoCommitWriter.commit();
                 }
               } catch (IOException e) {
-                log.error("Error committing " + name + " Lucene index", e);
+                log.error("Error committing " + index + " Lucene index", e);
               } catch (OutOfMemoryError e) {
-                log.error("Error committing " + name + " Lucene index", e);
+                log.error("Error committing " + index + " Lucene index", e);
                 try {
                   autoCommitWriter.close();
                 } catch (IOException e2) {
-                  log.error("SEVERE: Error closing " + name
+                  log.error("SEVERE: Error closing " + index
                       + " Lucene index  after OOM; index may be corrupted.", e);
                 }
               }
@@ -181,7 +183,7 @@ public abstract class AbstractLuceneIndex<K, V> implements Index<K, V> {
 
   @Override
   public void markReady(boolean ready) throws IOException {
-    setReady(sitePaths, schema.getVersion(), ready);
+    setReady(sitePaths, name, schema.getVersion(), ready);
   }
 
   @Override

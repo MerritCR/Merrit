@@ -27,7 +27,6 @@ import com.google.common.util.concurrent.AsyncFunction;
 import com.google.common.util.concurrent.Futures;
 import com.google.common.util.concurrent.ListenableFuture;
 import com.google.common.util.concurrent.ListeningExecutorService;
-import com.google.common.util.concurrent.MoreExecutors;
 import com.google.gerrit.reviewdb.client.Change;
 import com.google.gerrit.reviewdb.client.Project;
 import com.google.gerrit.reviewdb.server.ReviewDb;
@@ -152,43 +151,11 @@ public class AllChangesIndexer
     final AtomicBoolean ok = new AtomicBoolean(true);
 
     for (final Project.NameKey project : projects) {
-      final ListenableFuture<?> future = executor.submit(reindexProject(
+      ListenableFuture<?> future = executor.submit(reindexProject(
           indexerFactory.create(executor, index), project, doneTask, failedTask,
           verboseWriter));
+      addErrorListener(future, "project " + project, projTask, ok);
       futures.add(future);
-      future.addListener(new Runnable() {
-        @Override
-        public void run() {
-          try {
-            future.get();
-          } catch (ExecutionException | InterruptedException e) {
-            fail(project, e);
-          } catch (RuntimeException e) {
-            failAndThrow(project, e);
-          } catch (Error e) {
-            // Can't join with RuntimeException because "RuntimeException |
-            // Error" becomes Throwable, which messes with signatures.
-            failAndThrow(project, e);
-          } finally {
-            projTask.update(1);
-          }
-        }
-
-        private void fail(Project.NameKey project, Throwable t) {
-          log.error("Failed to index project " + project, t);
-          ok.set(false);
-        }
-
-        private void failAndThrow(Project.NameKey project, RuntimeException e) {
-          fail(project, e);
-          throw e;
-        }
-
-        private void failAndThrow(Project.NameKey project, Error e) {
-          fail(project, e);
-          throw e;
-        }
-      }, MoreExecutors.directExecutor());
     }
 
     try {
@@ -267,7 +234,6 @@ public class AllChangesIndexer
     private final ProgressMonitor failed;
     private final PrintWriter verboseWriter;
     private final Repository repo;
-    private RevWalk walk;
 
     private ProjectIndexer(ChangeIndexer indexer,
         ThreeWayMergeStrategy mergeStrategy,
@@ -289,8 +255,8 @@ public class AllChangesIndexer
 
     @Override
     public Void call() throws Exception {
-      walk = new RevWalk(repo);
-      try {
+      try (ObjectInserter ins = repo.newObjectInserter();
+          RevWalk walk = new RevWalk(ins.newReader())) {
         // Walk only refs first to cover as many changes as we can without having
         // to mark every single change.
         for (Ref ref : repo.getRefDatabase().getRefs(Constants.R_HEADS).values()) {
@@ -303,26 +269,25 @@ public class AllChangesIndexer
         RevCommit bCommit;
         while ((bCommit = walk.next()) != null && !byId.isEmpty()) {
           if (byId.containsKey(bCommit)) {
-            getPathsAndIndex(bCommit);
+            getPathsAndIndex(walk, ins, bCommit);
             byId.removeAll(bCommit);
           }
         }
 
         for (ObjectId id : byId.keySet()) {
-          getPathsAndIndex(id);
+          getPathsAndIndex(walk, ins, id);
         }
-      } finally {
-        walk.close();
       }
       return null;
     }
 
-    private void getPathsAndIndex(ObjectId b) throws Exception {
+    private void getPathsAndIndex(RevWalk walk, ObjectInserter ins, ObjectId b)
+        throws Exception {
       List<ChangeData> cds = Lists.newArrayList(byId.get(b));
       try (DiffFormatter df = new DiffFormatter(DisabledOutputStream.INSTANCE)) {
         RevCommit bCommit = walk.parseCommit(b);
         RevTree bTree = bCommit.getTree();
-        RevTree aTree = aFor(bCommit, walk);
+        RevTree aTree = aFor(bCommit, walk, ins);
         df.setRepository(repo);
         if (!cds.isEmpty()) {
           List<String> paths = (aTree != null)
@@ -364,7 +329,8 @@ public class AllChangesIndexer
       return ImmutableList.copyOf(paths);
     }
 
-    private RevTree aFor(RevCommit b, RevWalk walk) throws IOException {
+    private RevTree aFor(RevCommit b, RevWalk walk, ObjectInserter ins)
+        throws IOException {
       switch (b.getParentCount()) {
         case 0:
           return walk.parseTree(emptyTree());
@@ -373,7 +339,7 @@ public class AllChangesIndexer
           walk.parseBody(a);
           return walk.parseTree(a.getTree());
         case 2:
-          RevCommit am = autoMerger.merge(repo, walk, b, mergeStrategy);
+          RevCommit am = autoMerger.merge(repo, walk, ins, b, mergeStrategy);
           return am == null ? null : am.getTree();
         default:
           return null;
