@@ -18,6 +18,7 @@ import com.google.gerrit.client.rpc.NativeMap;
 import com.google.gerrit.client.rpc.NativeString;
 import com.google.gerrit.client.rpc.Natives;
 import com.google.gwt.core.client.JavaScriptObject;
+import com.google.gwt.core.client.JsArrayString;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -43,7 +44,7 @@ public class ServerInfo extends JavaScriptObject {
   }
 
   public final native String urlAliasToken(String n) /*-{ return this.url_aliases[n]; }-*/;
-  private final native NativeMap<NativeString> _urlAliases() /*-{ return this.url_aliases; }-*/;
+  private native NativeMap<NativeString> _urlAliases() /*-{ return this.url_aliases; }-*/;
 
 
   public final boolean hasSshd() {
@@ -55,6 +56,7 @@ public class ServerInfo extends JavaScriptObject {
 
   public static class ChangeConfigInfo extends JavaScriptObject {
     public final native boolean allowDrafts() /*-{ return this.allow_drafts || false; }-*/;
+    public final native boolean allowBlame() /*-{ return this.allow_blame || false; }-*/;
     public final native int largeChange() /*-{ return this.large_change || 0; }-*/;
     public final native String replyLabel() /*-{ return this.reply_label; }-*/;
     public final native String replyTooltip() /*-{ return this.reply_tooltip; }-*/;
@@ -68,6 +70,8 @@ public class ServerInfo extends JavaScriptObject {
 
   public static class PluginConfigInfo extends JavaScriptObject {
     public final native boolean hasAvatars() /*-{ return this.has_avatars || false; }-*/;
+    public final native JsArrayString jsResourcePaths() /*-{
+        return this.js_resource_paths || []; }-*/;
 
     protected PluginConfigInfo() {
     }

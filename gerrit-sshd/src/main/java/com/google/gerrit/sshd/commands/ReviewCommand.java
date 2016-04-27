@@ -42,7 +42,6 @@ import com.google.gerrit.util.cli.CmdLineParser;
 import com.google.gson.JsonSyntaxException;
 import com.google.gwtorm.server.OrmException;
 import com.google.inject.Inject;
-import com.google.inject.Provider;
 
 import org.kohsuke.args4j.Argument;
 import org.kohsuke.args4j.Option;
@@ -124,6 +123,9 @@ public class ReviewCommand extends SshCommand {
       + "specified can be applied to the given patch set(s)")
   private boolean strictLabels;
 
+  @Option(name = "--tag", aliases = "-t", usage = "applies a tag to the given review", metaVar = "TAG")
+  private String changeTag;
+
   @Option(name = "--label", aliases = "-l", usage = "custom label(s) to assign", metaVar = "LABEL=VALUE")
   void addLabel(final String token) {
     LabelVote v = LabelVote.parseWithEquals(token);
@@ -138,7 +140,7 @@ public class ReviewCommand extends SshCommand {
   private AllProjectsName allProjects;
 
   @Inject
-  private Provider<GerritApi> gApi;
+  private GerritApi gApi;
 
   @Inject
   private PatchSetParser psParser;
@@ -198,6 +200,9 @@ public class ReviewCommand extends SshCommand {
       if (rebaseChange) {
         throw error("json and rebase actions are mutually exclusive");
       }
+      if (changeTag != null) {
+        throw error("json and tag actions are mutually exclusive");
+      }
     }
     if (rebaseChange) {
       if (deleteDraftPatchSet) {
@@ -245,7 +250,7 @@ public class ReviewCommand extends SshCommand {
 
   private void applyReview(PatchSet patchSet,
       final ReviewInput review) throws RestApiException {
-    gApi.get().changes()
+    gApi.changes()
         .id(patchSet.getId().getParentKey().get())
         .revision(patchSet.getRevision().get())
         .review(review);
@@ -268,6 +273,7 @@ public class ReviewCommand extends SshCommand {
 
     ReviewInput review = new ReviewInput();
     review.message = Strings.emptyToNull(changeComment);
+    review.tag = Strings.emptyToNull(changeTag);
     review.notify = notify;
     review.labels = Maps.newTreeMap();
     review.drafts = ReviewInput.DraftHandling.PUBLISH;
@@ -300,7 +306,7 @@ public class ReviewCommand extends SshCommand {
         applyReview(patchSet, review);
       }
 
-      if (rebaseChange){
+      if (rebaseChange) {
         revisionApi(patchSet).rebase();
       }
 
@@ -319,7 +325,7 @@ public class ReviewCommand extends SshCommand {
   }
 
   private ChangeApi changeApi(PatchSet patchSet) throws RestApiException {
-    return gApi.get().changes().id(patchSet.getId().getParentKey().get());
+    return gApi.changes().id(patchSet.getId().getParentKey().get());
   }
 
   private RevisionApi revisionApi(PatchSet patchSet) throws RestApiException {

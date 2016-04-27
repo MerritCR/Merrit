@@ -14,20 +14,33 @@
 
 package com.google.gerrit.server.api.accounts;
 
+import com.google.gerrit.common.RawInputUtil;
 import com.google.gerrit.common.errors.EmailException;
 import com.google.gerrit.extensions.api.accounts.AccountApi;
 import com.google.gerrit.extensions.api.accounts.EmailInput;
 import com.google.gerrit.extensions.api.accounts.GpgKeyApi;
+import com.google.gerrit.extensions.client.DiffPreferencesInfo;
+import com.google.gerrit.extensions.client.EditPreferencesInfo;
+import com.google.gerrit.extensions.client.GeneralPreferencesInfo;
 import com.google.gerrit.extensions.common.AccountInfo;
 import com.google.gerrit.extensions.common.GpgKeyInfo;
+import com.google.gerrit.extensions.common.SshKeyInfo;
 import com.google.gerrit.extensions.restapi.IdString;
 import com.google.gerrit.extensions.restapi.RestApiException;
 import com.google.gerrit.extensions.restapi.TopLevelResource;
 import com.google.gerrit.server.GpgException;
 import com.google.gerrit.server.account.AccountLoader;
 import com.google.gerrit.server.account.AccountResource;
+import com.google.gerrit.server.account.AddSshKey;
 import com.google.gerrit.server.account.CreateEmail;
 import com.google.gerrit.server.account.GetAvatar;
+import com.google.gerrit.server.account.GetDiffPreferences;
+import com.google.gerrit.server.account.GetEditPreferences;
+import com.google.gerrit.server.account.GetPreferences;
+import com.google.gerrit.server.account.GetSshKeys;
+import com.google.gerrit.server.account.SetDiffPreferences;
+import com.google.gerrit.server.account.SetEditPreferences;
+import com.google.gerrit.server.account.SetPreferences;
 import com.google.gerrit.server.account.StarredChanges;
 import com.google.gerrit.server.change.ChangeResource;
 import com.google.gerrit.server.change.ChangesCollection;
@@ -36,6 +49,9 @@ import com.google.inject.Inject;
 import com.google.inject.Provider;
 import com.google.inject.assistedinject.Assisted;
 
+import org.eclipse.jgit.errors.ConfigInvalidException;
+
+import java.io.IOException;
 import java.util.List;
 import java.util.Map;
 
@@ -48,27 +64,51 @@ public class AccountApiImpl implements AccountApi {
   private final ChangesCollection changes;
   private final AccountLoader.Factory accountLoaderFactory;
   private final Provider<GetAvatar> getAvatar;
+  private final GetPreferences getPreferences;
+  private final SetPreferences setPreferences;
+  private final GetDiffPreferences getDiffPreferences;
+  private final SetDiffPreferences setDiffPreferences;
+  private final GetEditPreferences getEditPreferences;
+  private final SetEditPreferences setEditPreferences;
   private final StarredChanges.Create starredChangesCreate;
   private final StarredChanges.Delete starredChangesDelete;
   private final CreateEmail.Factory createEmailFactory;
   private final GpgApiAdapter gpgApiAdapter;
+  private final GetSshKeys getSshKeys;
+  private final AddSshKey addSshKey;
 
   @Inject
   AccountApiImpl(AccountLoader.Factory ailf,
       ChangesCollection changes,
       Provider<GetAvatar> getAvatar,
+      GetPreferences getPreferences,
+      SetPreferences setPreferences,
+      GetDiffPreferences getDiffPreferences,
+      SetDiffPreferences setDiffPreferences,
+      GetEditPreferences getEditPreferences,
+      SetEditPreferences setEditPreferences,
       StarredChanges.Create starredChangesCreate,
       StarredChanges.Delete starredChangesDelete,
       CreateEmail.Factory createEmailFactory,
       GpgApiAdapter gpgApiAdapter,
+      GetSshKeys getSshKeys,
+      AddSshKey addSshKey,
       @Assisted AccountResource account) {
     this.account = account;
     this.accountLoaderFactory = ailf;
     this.changes = changes;
     this.getAvatar = getAvatar;
+    this.getPreferences = getPreferences;
+    this.setPreferences = setPreferences;
+    this.getDiffPreferences = getDiffPreferences;
+    this.setDiffPreferences = setDiffPreferences;
+    this.getEditPreferences = getEditPreferences;
+    this.setEditPreferences = setEditPreferences;
     this.starredChangesCreate = starredChangesCreate;
     this.starredChangesDelete = starredChangesDelete;
     this.createEmailFactory = createEmailFactory;
+    this.getSshKeys = getSshKeys;
+    this.addSshKey = addSshKey;
     this.gpgApiAdapter = gpgApiAdapter;
   }
 
@@ -93,6 +133,59 @@ public class AccountApiImpl implements AccountApi {
   }
 
   @Override
+  public GeneralPreferencesInfo getPreferences() throws RestApiException {
+    return getPreferences.apply(account);
+  }
+
+  @Override
+  public GeneralPreferencesInfo setPreferences(GeneralPreferencesInfo in)
+      throws RestApiException {
+    try {
+      return setPreferences.apply(account, in);
+    } catch (IOException | ConfigInvalidException e) {
+      throw new RestApiException("Cannot set preferences", e);
+    }
+  }
+
+  @Override
+  public DiffPreferencesInfo getDiffPreferences() throws RestApiException {
+    try {
+      return getDiffPreferences.apply(account);
+    } catch (IOException | ConfigInvalidException e) {
+      throw new RestApiException("Cannot query diff preferences", e);
+    }
+  }
+
+  @Override
+  public DiffPreferencesInfo setDiffPreferences(DiffPreferencesInfo in)
+      throws RestApiException {
+    try {
+      return setDiffPreferences.apply(account, in);
+    } catch (IOException | ConfigInvalidException e) {
+      throw new RestApiException("Cannot set diff preferences", e);
+    }
+  }
+
+  @Override
+  public EditPreferencesInfo getEditPreferences() throws RestApiException {
+    try {
+      return getEditPreferences.apply(account);
+    } catch (IOException | ConfigInvalidException e) {
+      throw new RestApiException("Cannot query edit preferences", e);
+    }
+  }
+
+  @Override
+  public EditPreferencesInfo setEditPreferences(EditPreferencesInfo in)
+      throws RestApiException {
+    try {
+      return setEditPreferences.apply(account, in);
+    } catch (IOException | ConfigInvalidException e) {
+      throw new RestApiException("Cannot set edit preferences", e);
+    }
+  }
+
+  @Override
   public void starChange(String id) throws RestApiException {
     try {
       ChangeResource rsrc = changes.parse(
@@ -100,7 +193,7 @@ public class AccountApiImpl implements AccountApi {
         IdString.fromUrl(id));
       starredChangesCreate.setChange(rsrc);
       starredChangesCreate.apply(account, new StarredChanges.EmptyInput());
-    } catch (OrmException e) {
+    } catch (OrmException | IOException e) {
       throw new RestApiException("Cannot star change", e);
     }
   }
@@ -114,7 +207,7 @@ public class AccountApiImpl implements AccountApi {
           new AccountResource.StarredChange(account.getUser(), rsrc);
       starredChangesDelete.apply(starredChange,
           new StarredChanges.EmptyInput());
-    } catch (OrmException e) {
+    } catch (OrmException | IOException e) {
       throw new RestApiException("Cannot unstar change", e);
     }
   }
@@ -127,6 +220,26 @@ public class AccountApiImpl implements AccountApi {
       createEmailFactory.create(input.email).apply(rsrc, input);
     } catch (EmailException | OrmException e) {
       throw new RestApiException("Cannot add email", e);
+    }
+  }
+
+  @Override
+  public List<SshKeyInfo> listSshKeys() throws RestApiException {
+    try {
+      return getSshKeys.apply(account);
+    } catch (OrmException e) {
+      throw new RestApiException("Cannot list SSH keys", e);
+    }
+  }
+
+  @Override
+  public SshKeyInfo addSshKey(String key) throws RestApiException {
+    AddSshKey.Input in = new AddSshKey.Input();
+    in.raw = RawInputUtil.create(key);
+    try {
+      return addSshKey.apply(account, in).value();
+    } catch (OrmException | IOException e) {
+      throw new RestApiException("Cannot add SSH key", e);
     }
   }
 

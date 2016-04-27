@@ -25,7 +25,6 @@ import net.codemirror.lib.Pos;
 import net.codemirror.lib.TextMarker;
 
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.List;
 
 /** Colors modified regions for {@link SideBySide} and {@link Unified}. */
@@ -33,23 +32,15 @@ abstract class ChunkManager {
   static final native void onClick(Element e, JavaScriptObject f)
   /*-{ e.onclick = f }-*/;
 
-  private final Scrollbar scrollbar;
-  private final LineMapper mapper;
+  final Scrollbar scrollbar;
+  final LineMapper lineMapper;
 
   private List<TextMarker> markers;
   private List<Runnable> undo;
 
   ChunkManager(Scrollbar scrollbar) {
     this.scrollbar = scrollbar;
-    this.mapper = new LineMapper();
-  }
-
-  LineMapper getLineMapper() {
-    return mapper;
-  }
-
-  Scrollbar getScrollbar() {
-    return scrollbar;
+    this.lineMapper = new LineMapper();
   }
 
   abstract DiffChunkInfo getFirst();
@@ -59,7 +50,7 @@ abstract class ChunkManager {
   }
 
   void reset() {
-    mapper.reset();
+    lineMapper.reset();
     for (TextMarker m : markers) {
       m.clear();
     }
@@ -110,7 +101,7 @@ abstract class ChunkManager {
 
     DiffChunkInfo lookUp = chunks.get(res);
     // If edit, skip the deletion chunk and set focus on the insertion one.
-    if (lookUp.isEdit() && lookUp.getSide() == A) {
+    if (lookUp.edit && lookUp.side == A) {
       res = res + (dir == Direction.PREV ? -1 : 1);
       if (res < 0 || chunks.size() <= res) {
         return;
@@ -118,36 +109,13 @@ abstract class ChunkManager {
     }
 
     DiffChunkInfo target = chunks.get(res);
-    CodeMirror targetCm = host.getCmFromSide(target.getSide());
-    int cmLine = getCmLine(target.getStart(), target.getSide());
+    CodeMirror targetCm = host.getCmFromSide(target.side);
+    int cmLine = getCmLine(target.start, target.side);
     targetCm.setCursor(Pos.create(cmLine));
     targetCm.focus();
     targetCm.scrollToY(
         targetCm.heightAtLine(cmLine, "local")
         - 0.5 * targetCm.scrollbarV().getClientHeight());
-  }
-
-  Comparator<DiffChunkInfo> getDiffChunkComparator() {
-    // Chunks are ordered by their starting line. If it's a deletion,
-    // use its corresponding line on the revision side for comparison.
-    // In the edit case, put the deletion chunk right before the
-    // insertion chunk. This placement guarantees well-ordering.
-    return new Comparator<DiffChunkInfo>() {
-      @Override
-      public int compare(DiffChunkInfo a, DiffChunkInfo b) {
-        if (a.getSide() == b.getSide()) {
-          return a.getStart() - b.getStart();
-        } else if (a.getSide() == A) {
-          int comp = mapper.lineOnOther(a.getSide(), a.getStart())
-              .getLine() - b.getStart();
-          return comp == 0 ? -1 : comp;
-        } else {
-          int comp = a.getStart() -
-              mapper.lineOnOther(b.getSide(), b.getStart()).getLine();
-          return comp == 0 ? 1 : comp;
-        }
-      }
-    };
   }
 
   abstract int getCmLine(int line, DisplaySide side);

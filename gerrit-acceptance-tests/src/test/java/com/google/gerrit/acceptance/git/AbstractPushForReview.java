@@ -34,11 +34,11 @@ import com.google.gerrit.extensions.api.changes.ReviewInput;
 import com.google.gerrit.extensions.api.changes.ReviewInput.NotifyHandling;
 import com.google.gerrit.extensions.client.InheritableBoolean;
 import com.google.gerrit.extensions.common.ChangeInfo;
+import com.google.gerrit.extensions.common.ChangeMessageInfo;
 import com.google.gerrit.extensions.common.EditInfo;
 import com.google.gerrit.extensions.common.LabelInfo;
 import com.google.gerrit.reviewdb.client.AccountGroup;
 import com.google.gerrit.reviewdb.client.Change;
-import com.google.gerrit.server.git.MetaDataUpdate;
 import com.google.gerrit.server.git.ProjectConfig;
 import com.google.gerrit.server.group.SystemGroupBackend;
 import com.google.gerrit.server.project.Util;
@@ -51,6 +51,7 @@ import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
+import java.util.Collection;
 import java.util.Set;
 
 public abstract class AbstractPushForReview extends AbstractDaemonTest {
@@ -74,7 +75,7 @@ public abstract class AbstractPushForReview extends AbstractDaemonTest {
 
   @Before
   public void setUp() throws Exception {
-    sshUrl = sshSession.getUrl();
+    sshUrl = adminSshSession.getUrl();
     ProjectConfig cfg = projectCache.checkedGet(project).getConfig();
     patchSetLock = Util.patchSetLock();
     cfg.getLabelSections().put(patchSetLock.getName(), patchSetLock);
@@ -84,12 +85,6 @@ public abstract class AbstractPushForReview extends AbstractDaemonTest {
         "refs/heads/*");
     saveProjectConfig(cfg);
     grant(Permission.LABEL + "Patch-Set-Lock", project, "refs/heads/*");
-  }
-
-  private void saveProjectConfig(ProjectConfig cfg) throws Exception {
-    try (MetaDataUpdate md = metaDataUpdateFactory.create(project)) {
-      cfg.commit(md);
-    }
   }
 
   protected void selectProtocol(Protocol p) throws Exception {
@@ -234,6 +229,20 @@ public abstract class AbstractPushForReview extends AbstractDaemonTest {
     r.assertOkStatus();
     edit = getEdit(r.getChangeId());
     assertThat(edit).isNotNull();
+  }
+
+  @Test
+  public void testPushForMasterWithMessage() throws Exception {
+    PushOneCommit.Result r = pushTo("refs/for/master/%m=my_test_message");
+    r.assertOkStatus();
+    r.assertChange(Change.Status.NEW, null);
+    ChangeInfo ci = get(r.getChangeId());
+    Collection<ChangeMessageInfo> changeMessages = ci.messages;
+    assertThat(changeMessages).hasSize(1);
+    for (ChangeMessageInfo cm : changeMessages) {
+      assertThat(cm.message).isEqualTo(
+          "Uploaded patch set 1.\nmy test message");
+    }
   }
 
   @Test

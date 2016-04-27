@@ -23,7 +23,6 @@ import com.google.gerrit.server.change.ArchiveFormat;
 import com.google.gerrit.server.change.GetArchive;
 import com.google.gerrit.sshd.AbstractGitCommand;
 import com.google.inject.Inject;
-import com.google.inject.Provider;
 
 import org.eclipse.jgit.api.ArchiveCommand;
 import org.eclipse.jgit.api.errors.GitAPIException;
@@ -104,7 +103,7 @@ public class UploadArchive extends AbstractGitCommand {
   @Inject
   private GetArchive.AllowedFormats allowedFormats;
   @Inject
-  private Provider<ReviewDb> db;
+  private ReviewDb db;
   private Options options = new Options();
 
   /**
@@ -127,7 +126,7 @@ public class UploadArchive extends AbstractGitCommand {
         throw new Failure(1, "fatal: 'argument' token or flush expected");
       }
       String[] parts = s.substring(argCmd.length()).split("=", 2);
-      for(String p : parts) {
+      for (String p : parts) {
         args.add(p);
       }
     }
@@ -218,7 +217,7 @@ public class UploadArchive extends AbstractGitCommand {
   private boolean canRead(ObjectId revId) throws IOException {
     try (RevWalk rw = new RevWalk(repo)) {
       RevCommit commit = rw.parseCommit(revId);
-      return projectControl.canReadCommit(db.get(), rw, commit);
+      return projectControl.canReadCommit(db, rw, commit);
     }
   }
 }

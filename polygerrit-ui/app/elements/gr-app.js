@@ -30,16 +30,17 @@
       },
       _serverConfig: Object,
       _version: String,
-      _diffPreferences: Object,
       _preferences: Object,
       _showChangeListView: Boolean,
       _showDashboardView: Boolean,
       _showChangeView: Boolean,
       _showDiffView: Boolean,
       _viewState: Object,
+      _lastError: Object,
     },
 
     listeners: {
+      'page-error': '_handlePageError',
       'title-change': '_handleTitleChange',
     },
 
@@ -91,29 +92,9 @@
         this.$.restAPI.getPreferences().then(function(preferences) {
           this._preferences = preferences;
         }.bind(this));
-        this.$.restAPI.getDiffPreferences().then(function(prefs) {
-          this._diffPreferences = prefs;
-        }.bind(this));
+        // Diff preferences are cached; warm it before a diff is rendered.
+        this.$.restAPI.getDiffPreferences();
       } else {
-        // These defaults should match the defaults in
-        // gerrit-extension-api/src/main/jcg/gerrit/extensions/client/DiffPreferencesInfo.java
-        // NOTE: There are some settings that don't apply to PolyGerrit
-        // (Render mode being at least one of them).
-        this._diffPreferences = {
-          auto_hide_diff_table_header: true,
-          context: 10,
-          cursor_blink_rate: 0,
-          ignore_whitespace: 'IGNORE_NONE',
-          intraline_difference: true,
-          line_length: 100,
-          show_line_endings: true,
-          show_tabs: true,
-          show_whitespace_errors: true,
-          syntax_highlighting: true,
-          tab_size: 8,
-          theme: 'DEFAULT',
-        };
-
         this._preferences = {
           changes_per_page: 25,
         };
@@ -121,10 +102,11 @@
     },
 
     _viewChanged: function(view) {
-      this.set('_showChangeListView', view == 'gr-change-list-view');
-      this.set('_showDashboardView', view == 'gr-dashboard-view');
-      this.set('_showChangeView', view == 'gr-change-view');
-      this.set('_showDiffView', view == 'gr-diff-view');
+      this.$.errorView.hidden = true;
+      this.set('_showChangeListView', view === 'gr-change-list-view');
+      this.set('_showDashboardView', view === 'gr-dashboard-view');
+      this.set('_showChangeView', view === 'gr-change-view');
+      this.set('_showDiffView', view === 'gr-diff-view');
     },
 
     _loginTapHandler: function(e) {
@@ -133,8 +115,34 @@
           window.location.pathname + window.location.hash));
     },
 
-    _computeLoggedIn: function(account) { // argument used for binding update only
+    // Argument used for binding update only.
+    _computeLoggedIn: function(account) {
       return this.loggedIn;
+    },
+
+    _handlePageError: function(e) {
+      [
+        '_showChangeListView',
+        '_showDashboardView',
+        '_showChangeView',
+        '_showDiffView',
+      ].forEach(function(showProp) {
+        this.set(showProp, false);
+      }.bind(this));
+
+      this.$.errorView.hidden = false;
+      var response = e.detail.response;
+      var err = {text: [response.status, response.statusText].join(' ')};
+      if (response.status === 404) {
+        err.emoji = '¯\\_(ツ)_/¯';
+        this._lastError = err;
+      } else {
+        err.emoji = 'o_O';
+        response.text().then(function(text) {
+          err.moreInfo = text;
+          this._lastError = err;
+        }.bind(this));
+      }
     },
 
     _handleTitleChange: function(e) {
@@ -148,11 +156,8 @@
     _handleKey: function(e) {
       if (this.shouldSupressKeyboardShortcut(e)) { return; }
 
-      switch (e.keyCode) {
-        case 191:  // '/' or '?' with shift key.
-          // TODO(andybons): Localization using e.key/keypress event.
-          if (!e.shiftKey) { break; }
-          this.$.keyboardShortcuts.open();
+      if (e.keyCode === 191 && e.shiftKey) {  // '/' or '?' with shift key.
+        this.$.keyboardShortcuts.open();
       }
     },
 

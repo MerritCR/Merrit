@@ -57,14 +57,14 @@ class LineComment extends Composite {
       ps = defaultPs;
       psLoc.removeFromParent();
       psLoc = null;
-      psNum= null;
+      psNum = null;
     } else {
       ps = defaultPs;
       sideLoc.removeFromParent();
       sideLoc = null;
       psLoc.removeFromParent();
       psLoc = null;
-      psNum= null;
+      psNum = null;
     }
 
     if (info.hasLine()) {
@@ -88,7 +88,7 @@ class LineComment extends Composite {
   }
 
   private static String url(PatchSet.Id ps, CommentInfo info) {
-    return Dispatcher.toSideBySide(null, ps, info.path(),
+    return Dispatcher.toPatch(null, ps, info.path(),
         info.side() == Side.PARENT ? DisplaySide.A : DisplaySide.B,
         info.line());
   }

@@ -33,7 +33,6 @@ import com.google.gerrit.sshd.SshScope.Context;
 import com.google.gerrit.util.cli.CmdLineParser;
 import com.google.gerrit.util.cli.EndOfOptionsHandler;
 import com.google.inject.Inject;
-import com.google.inject.Provider;
 
 import org.apache.sshd.common.SshException;
 import org.apache.sshd.server.Command;
@@ -89,10 +88,10 @@ public abstract class BaseCommand implements Command {
   private WorkQueue.Executor executor;
 
   @Inject
-  private Provider<CurrentUser> user;
+  private CurrentUser user;
 
   @Inject
-  private Provider<SshScope.Context> contextProvider;
+  private SshScope.Context context;
 
   /** Commands declared by a plugin can be scoped by the plugin name. */
   @Inject(optional = true)
@@ -278,7 +277,7 @@ public abstract class BaseCommand implements Command {
     final TaskThunk tt = new TaskThunk(thunk);
 
     if (isAdminHighPriorityCommand()
-        && user.get().getCapabilities().canAdministrateServer()) {
+        && user.getCapabilities().canAdministrateServer()) {
       // Admin commands should not block the main work threads (there
       // might be an interactive shell there), nor should they wait
       // for the main work threads.
@@ -289,7 +288,7 @@ public abstract class BaseCommand implements Command {
     }
   }
 
-  private final boolean isAdminHighPriorityCommand() {
+  private boolean isAdminHighPriorityCommand() {
     return getClass().getAnnotation(AdminHighPriorityCommand.class) != null;
   }
 
@@ -332,8 +331,8 @@ public abstract class BaseCommand implements Command {
     if (!(e instanceof UnloggedFailure)) {
       final StringBuilder m = new StringBuilder();
       m.append("Internal server error");
-      if (user.get().isIdentifiedUser()) {
-        final IdentifiedUser u = user.get().asIdentifiedUser();
+      if (user.isIdentifiedUser()) {
+        final IdentifiedUser u = user.asIdentifiedUser();
         m.append(" (user ");
         m.append(u.getAccount().getUserName());
         m.append(" account ");
@@ -341,7 +340,7 @@ public abstract class BaseCommand implements Command {
         m.append(")");
       }
       m.append(" during ");
-      m.append(contextProvider.get().getCommandLine());
+      m.append(context.getCommandLine());
       log.error(m.toString(), e);
     }
 
@@ -388,18 +387,16 @@ public abstract class BaseCommand implements Command {
 
   private final class TaskThunk implements CancelableRunnable, ProjectRunnable {
     private final CommandRunnable thunk;
-    private final Context context;
     private final String taskName;
     private Project.NameKey projectName;
 
     private TaskThunk(final CommandRunnable thunk) {
       this.thunk = thunk;
-      this.context = contextProvider.get();
 
       StringBuilder m = new StringBuilder();
       m.append(context.getCommandLine());
-      if (user.get().isIdentifiedUser()) {
-        IdentifiedUser u = user.get().asIdentifiedUser();
+      if (user.isIdentifiedUser()) {
+        IdentifiedUser u = user.asIdentifiedUser();
         m.append(" (").append(u.getAccount().getUserName()).append(")");
       }
       this.taskName = m.toString();
@@ -488,12 +485,12 @@ public abstract class BaseCommand implements Command {
   }
 
   /** Runnable function which can throw an exception. */
-  public static interface CommandRunnable {
+  public interface CommandRunnable {
     void run() throws Exception;
   }
 
   /** Runnable function which can retrieve a project name related to the task */
-  public static interface ProjectCommandRunnable extends CommandRunnable {
+  public interface ProjectCommandRunnable extends CommandRunnable {
     // execute parser command before running, in order to be able to retrieve
     // project name
     void executeParseCommand() throws Exception;

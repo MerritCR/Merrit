@@ -83,7 +83,7 @@ public class SubmitRuleEvaluator {
   private static class UserTermExpected extends Exception {
     private static final long serialVersionUID = 1L;
 
-    public UserTermExpected(SubmitRecord.Label label) {
+    UserTermExpected(SubmitRecord.Label label) {
       super(String.format("A label with the status %s must contain a user.",
           label.toString()));
     }
@@ -614,6 +614,9 @@ public class SubmitRuleEvaluator {
   private void initPatchSet() throws OrmException {
     if (patchSet == null) {
       patchSet = cd.currentPatchSet();
+      if (patchSet == null) {
+        throw new OrmException("No patch set found");
+      }
     }
   }
 

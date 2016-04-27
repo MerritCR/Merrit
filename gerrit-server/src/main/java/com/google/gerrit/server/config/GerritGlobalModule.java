@@ -45,6 +45,7 @@ import com.google.gerrit.extensions.webui.FileWebLink;
 import com.google.gerrit.extensions.webui.PatchSetWebLink;
 import com.google.gerrit.extensions.webui.ProjectWebLink;
 import com.google.gerrit.extensions.webui.TopMenu;
+import com.google.gerrit.extensions.webui.WebUiPlugin;
 import com.google.gerrit.rules.PrologModule;
 import com.google.gerrit.rules.RulesCache;
 import com.google.gerrit.server.AnonymousUser;
@@ -144,6 +145,8 @@ import com.google.gerrit.server.validators.GroupCreationValidationListener;
 import com.google.gerrit.server.validators.HashtagValidationListener;
 import com.google.gerrit.server.validators.OutgoingEmailValidationListener;
 import com.google.gerrit.server.validators.ProjectCreationValidationListener;
+import com.google.gitiles.blame.BlameCache;
+import com.google.gitiles.blame.BlameCacheImpl;
 import com.google.inject.Inject;
 import com.google.inject.TypeLiteral;
 import com.google.inject.internal.UniqueAnnotations;
@@ -171,6 +174,7 @@ public class GerritGlobalModule extends FactoryModule {
 
     bind(IdGenerator.class);
     bind(RulesCache.class);
+    bind(BlameCache.class).to(BlameCacheImpl.class);
     bind(Sequences.class);
     install(authModule);
     install(AccountByEmailCacheImpl.module());
@@ -309,6 +313,7 @@ public class GerritGlobalModule extends FactoryModule {
     DynamicSet.setOf(binder(), BranchWebLink.class);
     DynamicMap.mapOf(binder(), OAuthLoginProvider.class);
     DynamicSet.setOf(binder(), AccountExternalIdCreator.class);
+    DynamicSet.setOf(binder(), WebUiPlugin.class);
 
     factory(UploadValidators.Factory.class);
     DynamicSet.setOf(binder(), UploadValidationListener.class);

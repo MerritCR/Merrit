@@ -114,6 +114,9 @@ public class LuceneChangeIndex implements ChangeIndex {
   private static final String PATCH_SET_FIELD = ChangeField.PATCH_SET.getName();
   private static final String REVIEWEDBY_FIELD =
       ChangeField.REVIEWEDBY.getName();
+  private static final String HASHTAG_FIELD =
+      ChangeField.HASHTAG_CASE_AWARE.getName();
+  private static final String STARREDBY_FIELD = ChangeField.STARREDBY.getName();
 
   static Term idTerm(ChangeData cd) {
     return QueryBuilder.intTerm(LEGACY_ID.getName(), cd.getId().get());
@@ -413,6 +416,12 @@ public class LuceneChangeIndex implements ChangeIndex {
     if (fields.contains(REVIEWEDBY_FIELD)) {
       decodeReviewedBy(doc, cd);
     }
+    if (fields.contains(HASHTAG_FIELD)) {
+      decodeHashtags(doc, cd);
+    }
+    if (fields.contains(STARREDBY_FIELD)) {
+      decodeStarredBy(doc, cd);
+    }
     return cd;
   }
 
@@ -464,6 +473,25 @@ public class LuceneChangeIndex implements ChangeIndex {
       }
       cd.setReviewedBy(accounts);
     }
+  }
+
+  private void decodeHashtags(Document doc, ChangeData cd) {
+    IndexableField[] hashtag = doc.getFields(HASHTAG_FIELD);
+    Set<String> hashtags = Sets.newHashSetWithExpectedSize(hashtag.length);
+    for (IndexableField r : hashtag) {
+      hashtags.add(r.binaryValue().utf8ToString());
+    }
+    cd.setHashtags(hashtags);
+  }
+
+  private void decodeStarredBy(Document doc, ChangeData cd) {
+    IndexableField[] starredBy = doc.getFields(STARREDBY_FIELD);
+    Set<Account.Id> accounts =
+        Sets.newHashSetWithExpectedSize(starredBy.length);
+    for (IndexableField r : starredBy) {
+      accounts.add(new Account.Id(r.numericValue().intValue()));
+    }
+    cd.setStarredBy(accounts);
   }
 
   private static <T> List<T> decodeProtos(Document doc, String fieldName,

@@ -17,6 +17,54 @@
   var JSON_PREFIX = ')]}\'';
   var PARENT_PATCH_NUM = 'PARENT';
 
+  // Must be kept in sync with the ListChangesOption enum and protobuf.
+  var ListChangesOption = {
+    LABELS: 0,
+    DETAILED_LABELS: 8,
+
+    // Return information on the current patch set of the change.
+    CURRENT_REVISION: 1,
+    ALL_REVISIONS: 2,
+
+    // If revisions are included, parse the commit object.
+    CURRENT_COMMIT: 3,
+    ALL_COMMITS: 4,
+
+    // If a patch set is included, include the files of the patch set.
+    CURRENT_FILES: 5,
+    ALL_FILES: 6,
+
+    // If accounts are included, include detailed account info.
+    DETAILED_ACCOUNTS: 7,
+
+    // Include messages associated with the change.
+    MESSAGES: 9,
+
+    // Include allowed actions client could perform.
+    CURRENT_ACTIONS: 10,
+
+    // Set the reviewed boolean for the caller.
+    REVIEWED: 11,
+
+    // Include download commands for the caller.
+    DOWNLOAD_COMMANDS: 13,
+
+    // Include patch set weblinks.
+    WEB_LINKS: 14,
+
+    // Include consistency check results.
+    CHECK: 15,
+
+    // Include allowed change actions client could perform.
+    CHANGE_ACTIONS: 16,
+
+    // Include a copy of commit messages including review footers.
+    COMMIT_FOOTERS: 17,
+
+    // Include push certificate information along with any patch sets.
+    PUSH_CERTIFICATES: 18
+  };
+
   Polymer({
     is: 'gr-rest-api-interface',
 
@@ -31,7 +79,8 @@
       },
     },
 
-    fetchJSON: function(url, opt_cancelCondition, opt_params, opt_opts) {
+    fetchJSON: function(url, opt_errFn, opt_cancelCondition, opt_params,
+        opt_opts) {
       opt_opts = opt_opts || {};
 
       var fetchOptions = {
@@ -62,28 +111,41 @@
           return;
         }
 
-        return response.text().then(function(text) {
-          var result;
-          try {
-            result = JSON.parse(text.substring(JSON_PREFIX.length));
-          } catch (_) {
-            result = null;
-          }
-          return result;
-        });
-      }).catch(function(err) {
+        if (!response.ok && opt_errFn) {
+          opt_errFn.call(null, response);
+          return undefined;
+        }
+        return this.getResponseObject(response);
+      }.bind(this)).catch(function(err) {
         if (opt_opts.noCredentials) {
           throw err;
         } else {
           // This could be because of a 302 auth redirect. Retry the request.
-          return this.fetchJSON(url, opt_cancelCondition, opt_params,
+          return this.fetchJSON(url, opt_errFn, opt_cancelCondition, opt_params,
               Object.assign(opt_opts, {noCredentials: true}));
         }
       }.bind(this));
     },
 
+    getResponseObject: function(response) {
+      return response.text().then(function(text) {
+        var result;
+        try {
+          result = JSON.parse(text.substring(JSON_PREFIX.length));
+        } catch (_) {
+          result = null;
+        }
+        return result;
+      });
+    },
+
     getConfig: function() {
       return this._fetchSharedCacheURL('/config/server/info');
+    },
+
+    getProjectConfig: function(project) {
+      return this._fetchSharedCacheURL(
+          '/projects/' + encodeURIComponent(project) + '/config');
     },
 
     getVersion: function() {
@@ -95,7 +157,7 @@
     },
 
     saveDiffPreferences: function(prefs, opt_errFn, opt_ctx) {
-      return this._save('PUT', '/accounts/self/preferences.diff', prefs,
+      return this.send('PUT', '/accounts/self/preferences.diff', prefs,
           opt_errFn, opt_ctx);
     },
 
@@ -135,26 +197,128 @@
       return this._sharedFetchPromises[url];
     },
 
+    getChangeActionURL: function(changeNum, opt_patchNum, endpoint) {
+      return this._changeBaseURL(changeNum, opt_patchNum) + endpoint;
+    },
+
+    getChangeDetail: function(changeNum, opt_errFn, opt_cancelCondition) {
+      var options = this._listChangesOptionsToHex(
+          ListChangesOption.ALL_REVISIONS,
+          ListChangesOption.CHANGE_ACTIONS,
+          ListChangesOption.DOWNLOAD_COMMANDS
+      );
+      return this._getChangeDetail(changeNum, options, opt_errFn,
+          opt_cancelCondition);
+    },
+
+    getDiffChangeDetail: function(changeNum, opt_errFn, opt_cancelCondition) {
+      var options = this._listChangesOptionsToHex(
+          ListChangesOption.ALL_REVISIONS
+      );
+      return this._getChangeDetail(changeNum, options, opt_errFn,
+          opt_cancelCondition);
+    },
+
+    _getChangeDetail: function(changeNum, options, opt_errFn,
+        opt_cancelCondition) {
+      return this.fetchJSON(
+          this.getChangeActionURL(changeNum, null, '/detail'),
+          opt_errFn,
+          opt_cancelCondition,
+          {O: options});
+    },
+
+    getChangeCommitInfo: function(changeNum, patchNum) {
+      return this.fetchJSON(
+          this.getChangeActionURL(changeNum, patchNum, '/commit?links'));
+    },
+
     getChangeFiles: function(changeNum, patchNum) {
       return this.fetchJSON(
-          this._changeBaseURL(changeNum, patchNum) + '/files');
+          this.getChangeActionURL(changeNum, patchNum, '/files'));
+    },
+
+    getChangeFilesAsSpeciallySortedArray: function(changeNum, patchNum) {
+      return this.getChangeFiles(changeNum, patchNum).then(
+          this._normalizeChangeFilesResponse.bind(this));
+    },
+
+    getChangeFilePathsAsSpeciallySortedArray: function(changeNum, patchNum) {
+      return this.getChangeFiles(changeNum, patchNum).then(function(files) {
+        return Object.keys(files).sort(this._specialFilePathCompare.bind(this));
+      }.bind(this));
+    },
+
+    _normalizeChangeFilesResponse: function(response) {
+      var paths = Object.keys(response).sort(
+          this._specialFilePathCompare.bind(this));
+      var files = [];
+      for (var i = 0; i < paths.length; i++) {
+        var info = response[paths[i]];
+        info.__path = paths[i];
+        info.lines_inserted = info.lines_inserted || 0;
+        info.lines_deleted = info.lines_deleted || 0;
+        files.push(info);
+      }
+      return files;
+    },
+
+    _specialFilePathCompare: function(a, b) {
+      var COMMIT_MESSAGE_PATH = '/COMMIT_MSG';
+      // The commit message always goes first.
+      if (a === COMMIT_MESSAGE_PATH) {
+        return -1;
+      }
+      if (b === COMMIT_MESSAGE_PATH) {
+        return 1;
+      }
+
+      var aLastDotIndex = a.lastIndexOf('.');
+      var aExt = a.substr(aLastDotIndex + 1);
+      var aFile = a.substr(0, aLastDotIndex);
+
+      var bLastDotIndex = b.lastIndexOf('.');
+      var bExt = b.substr(bLastDotIndex + 1);
+      var bFile = a.substr(0, bLastDotIndex);
+
+      // Sort header files above others with the same base name.
+      var headerExts = ['h', 'hxx', 'hpp'];
+      if (aFile.length > 0 && aFile === bFile) {
+        if (headerExts.indexOf(aExt) !== -1 &&
+            headerExts.indexOf(bExt) !== -1) {
+          return a.localeCompare(b);
+        }
+        if (headerExts.indexOf(aExt) !== -1) {
+          return -1;
+        }
+        if (headerExts.indexOf(bExt) !== -1) {
+          return 1;
+        }
+      }
+
+      return a.localeCompare(b);
+    },
+
+    getChangeRevisionActions: function(changeNum, patchNum) {
+      return this.fetchJSON(
+          this.getChangeActionURL(changeNum, patchNum, '/actions'));
     },
 
     getReviewedFiles: function(changeNum, patchNum) {
       return this.fetchJSON(
-          this._changeBaseURL(changeNum, patchNum) + '/files?reviewed');
+          this.getChangeActionURL(changeNum, patchNum, '/files?reviewed'));
     },
 
     saveFileReviewed: function(changeNum, patchNum, path, reviewed, opt_errFn,
         opt_ctx) {
       var method = reviewed ? 'PUT' : 'DELETE';
-      var url = this._changeBaseURL(changeNum, patchNum) + '/files/' +
-          encodeURIComponent(path) + '/reviewed';
+      var url = this.getChangeActionURL(changeNum, patchNum,
+          '/files/' + encodeURIComponent(path) + '/reviewed');
 
-      return this._save(method, url, null, opt_errFn, opt_ctx);
+      return this.send(method, url, null, opt_errFn, opt_ctx);
     },
 
-    _save: function(method, url, opt_body, opt_errFn, opt_ctx) {
+    send: function(method, url, opt_body, opt_errFn, opt_ctx) {
       var headers = new Headers({
         'X-Gerrit-Auth': this._getCookie('XSRF_TOKEN'),
       });
@@ -180,7 +344,7 @@
     },
 
     getDiff: function(changeNum, basePatchNum, patchNum, path,
-        opt_cancelCondition) {
+        opt_errFn, opt_cancelCondition) {
       var url = this._getDiffFetchURL(changeNum, patchNum, path);
       var params =  {
         context: 'ALL',
@@ -191,7 +355,7 @@
         params.base = basePatchNum;
       }
 
-      return this.fetchJSON(url, opt_cancelCondition, params);
+      return this.fetchJSON(url, opt_errFn, opt_cancelCondition, params);
     },
 
     _getDiffFetchURL: function(changeNum, patchNum, path) {
@@ -215,7 +379,7 @@
         opt_patchNum, opt_path) {
       if (!opt_basePatchNum && !opt_patchNum && !opt_path) {
         return this.fetchJSON(
-            this._getDiffCommentsFetchURL(changeNum, '/drafts'));
+            this._getDiffCommentsFetchURL(changeNum, endpoint));
       }
 
       function onlyParent(c) { return c.side == PARENT_PATCH_NUM; }
@@ -260,6 +424,16 @@
         v += '/revisions/' + opt_patchNum;
       }
       return v;
+    },
+
+    // Derived from
+    // gerrit-extension-api/src/main/j/c/g/gerrit/extensions/client/ListChangesOption.java
+    _listChangesOptionsToHex: function() {
+      var v = 0;
+      for (var i = 0; i < arguments.length; i++) {
+        v |= 1 << arguments[i];
+      }
+      return v.toString(16);
     },
 
     _getCookie: function(name) {

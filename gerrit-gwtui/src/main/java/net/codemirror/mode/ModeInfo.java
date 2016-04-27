@@ -91,6 +91,7 @@ public class ModeInfo extends JavaScriptObject {
       Modes.I.lua(),
       Modes.I.markdown(),
       Modes.I.mathematica(),
+      Modes.I.mbox(),
       Modes.I.mirc(),
       Modes.I.mllike(),
       Modes.I.modelica(),
@@ -106,6 +107,7 @@ public class ModeInfo extends JavaScriptObject {
       Modes.I.perl(),
       Modes.I.php(),
       Modes.I.pig(),
+      Modes.I.powershell(),
       Modes.I.properties(),
       Modes.I.protobuf(),
       Modes.I.puppet(),
@@ -116,6 +118,8 @@ public class ModeInfo extends JavaScriptObject {
       Modes.I.rst(),
       Modes.I.ruby(),
       Modes.I.rust(),
+      Modes.I.sas(),
+      Modes.I.sass(),
       Modes.I.scheme(),
       Modes.I.shell(),
       Modes.I.smalltalk(),
@@ -145,8 +149,10 @@ public class ModeInfo extends JavaScriptObject {
       Modes.I.verilog(),
       Modes.I.vhdl(),
       Modes.I.vue(),
+      Modes.I.webidl(),
       Modes.I.xml(),
       Modes.I.xquery(),
+      Modes.I.yacas(),
       Modes.I.yaml_frontmatter(),
       Modes.I.yaml(),
       Modes.I.z80(),
@@ -258,7 +264,7 @@ public class ModeInfo extends JavaScriptObject {
   public final native JsArrayString mimes()
   /*-{ return this.mimes || [this.mime] }-*/;
 
-  private final native JsArrayString ext()
+  private native JsArrayString ext()
   /*-{ return this.ext || [] }-*/;
 
   protected ModeInfo() {

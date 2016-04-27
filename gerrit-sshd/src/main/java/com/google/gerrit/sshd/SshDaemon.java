@@ -43,7 +43,6 @@ import com.jcraft.jsch.JSchException;
 import org.apache.mina.transport.socket.SocketSessionConfig;
 import org.apache.sshd.common.BaseBuilder;
 import org.apache.sshd.common.NamedFactory;
-import org.apache.sshd.common.SshdSocketAddress;
 import org.apache.sshd.common.channel.RequestHandler;
 import org.apache.sshd.common.cipher.Cipher;
 import org.apache.sshd.common.compression.BuiltinCompressions;
@@ -64,26 +63,27 @@ import org.apache.sshd.common.mac.Mac;
 import org.apache.sshd.common.random.JceRandomFactory;
 import org.apache.sshd.common.random.Random;
 import org.apache.sshd.common.random.SingletonRandomFactory;
-import org.apache.sshd.common.session.AbstractSession;
 import org.apache.sshd.common.session.ConnectionService;
 import org.apache.sshd.common.session.Session;
 import org.apache.sshd.common.util.SecurityUtils;
 import org.apache.sshd.common.util.buffer.Buffer;
 import org.apache.sshd.common.util.buffer.ByteArrayBuffer;
+import org.apache.sshd.common.util.net.SshdSocketAddress;
 import org.apache.sshd.server.Command;
 import org.apache.sshd.server.CommandFactory;
 import org.apache.sshd.server.ServerBuilder;
 import org.apache.sshd.server.SshServer;
 import org.apache.sshd.server.auth.UserAuth;
-import org.apache.sshd.server.auth.UserAuthPublicKeyFactory;
 import org.apache.sshd.server.auth.gss.GSSAuthenticator;
 import org.apache.sshd.server.auth.gss.UserAuthGSSFactory;
 import org.apache.sshd.server.auth.pubkey.PublickeyAuthenticator;
+import org.apache.sshd.server.auth.pubkey.UserAuthPublicKeyFactory;
 import org.apache.sshd.server.forward.ForwardingFilter;
 import org.apache.sshd.server.global.CancelTcpipForwardHandler;
 import org.apache.sshd.server.global.KeepAliveHandler;
 import org.apache.sshd.server.global.NoMoreSessionsHandler;
 import org.apache.sshd.server.global.TcpipForwardHandler;
+import org.apache.sshd.server.session.ServerSessionImpl;
 import org.apache.sshd.server.session.SessionFactory;
 import org.bouncycastle.crypto.prng.RandomGenerator;
 import org.bouncycastle.crypto.prng.VMPCRandomGenerator;
@@ -140,7 +140,7 @@ public class SshDaemon extends SshServer implements SshInfo, LifecycleListener {
   private static final Logger sshDaemonLog =
       LoggerFactory.getLogger(SshDaemon.class);
 
-  public static enum SshSessionBackend {
+  public enum SshSessionBackend {
     MINA,
     NIO2
   }
@@ -262,9 +262,9 @@ public class SshDaemon extends SshServer implements SshInfo, LifecycleListener {
           .setRate()
           .setUnit("failures"));
 
-    setSessionFactory(new SessionFactory() {
+    setSessionFactory(new SessionFactory(this) {
       @Override
-      protected AbstractSession createSession(final IoSession io)
+      protected ServerSessionImpl createSession(final IoSession io)
           throws Exception {
         connected.incrementAndGet();
         sessionsCreated.increment();
@@ -277,7 +277,7 @@ public class SshDaemon extends SshServer implements SshInfo, LifecycleListener {
           }
         }
 
-        GerritServerSession s = (GerritServerSession)super.createSession(io);
+        ServerSessionImpl s = super.createSession(io);
         int id = idGenerator.next();
         SocketAddress peer = io.getRemoteAddress();
         final SshSession sd = new SshSession(id, peer);
@@ -285,7 +285,7 @@ public class SshDaemon extends SshServer implements SshInfo, LifecycleListener {
 
         // Log a session close without authentication as a failure.
         //
-        s.addCloseSessionListener(new SshFutureListener<CloseFuture>() {
+        s.addCloseFutureListener(new SshFutureListener<CloseFuture>() {
           @Override
           public void operationComplete(CloseFuture future) {
             connected.decrementAndGet();
@@ -299,9 +299,9 @@ public class SshDaemon extends SshServer implements SshInfo, LifecycleListener {
       }
 
       @Override
-      protected AbstractSession doCreateSession(IoSession ioSession)
+      protected ServerSessionImpl doCreateSession(IoSession ioSession)
           throws Exception {
-        return new GerritServerSession(getServer(), ioSession);
+        return new ServerSessionImpl(getServer(), ioSession);
       }
     });
     setGlobalRequestHandlers(Arrays.<RequestHandler<ConnectionService>> asList(
@@ -327,10 +327,9 @@ public class SshDaemon extends SshServer implements SshInfo, LifecycleListener {
   public synchronized void start() {
     if (daemonAcceptor == null && !listen.isEmpty()) {
       checkConfig();
-      if (sessionFactory == null) {
-        sessionFactory = createSessionFactory();
+      if (getSessionFactory() == null) {
+        setSessionFactory(createSessionFactory());
       }
-      sessionFactory.setServer(this);
       daemonAcceptor = createAcceptor();
 
       try {
@@ -465,6 +464,11 @@ public class SshDaemon extends SshServer implements SshInfo, LifecycleListener {
     }
 
     @Override
+    public String getName() {
+      return "InsecureBouncyCastleRandom";
+    }
+
+    @Override
     public void fill(byte[] bytes, int start, int len) {
       random.nextBytes(bytes, start, len);
     }
@@ -485,21 +489,21 @@ public class SshDaemon extends SshServer implements SshInfo, LifecycleListener {
         do {
           bits = next(31);
           val = bits % n;
-        } while (bits - val + (n-1) < 0);
+        } while (bits - val + (n - 1) < 0);
         return val;
       }
       throw new IllegalArgumentException();
     }
 
     protected final int next(int numBits) {
-      int bytes = (numBits+7)/8;
+      int bytes = (numBits + 7) / 8;
       byte[] next = new byte[bytes];
       int ret = 0;
       random.nextBytes(next);
       for (int i = 0; i < bytes; i++) {
         ret = (next[i] & 0xFF) | (ret << 8);
       }
-      return ret >>> (bytes*8 - numBits);
+      return ret >>> (bytes * 8 - numBits);
     }
   }
 
@@ -670,7 +674,7 @@ public class SshDaemon extends SshServer implements SshInfo, LifecycleListener {
         try {
           kerberosPrincipal = "host/" +
               InetAddress.getLocalHost().getCanonicalHostName();
-        } catch(UnknownHostException e) {
+        } catch (UnknownHostException e) {
           kerberosPrincipal = "host/localhost";
         }
       }

@@ -19,11 +19,11 @@ import com.google.gwt.core.client.JavaScriptObject;
 import com.google.gwt.core.client.JsArray;
 
 public class ReviewInput extends JavaScriptObject {
-  public static enum NotifyHandling {
+  public enum NotifyHandling {
     NONE, OWNER, OWNER_REVIEWERS, ALL
   }
 
-  public static enum DraftHandling {
+  public enum DraftHandling {
     DELETE, PUBLISH, KEEP, PUBLISH_ALL_REVISIONS
   }
 
@@ -42,14 +42,14 @@ public class ReviewInput extends JavaScriptObject {
   public final void notify(NotifyHandling e) {
     _notify(e.name());
   }
-  private final native void _notify(String n) /*-{ this.notify=n; }-*/;
+  private native void _notify(String n) /*-{ this.notify=n; }-*/;
 
   public final void drafts(DraftHandling e) {
     _drafts(e.name());
   }
-  private final native void _drafts(String n) /*-{ this.drafts=n; }-*/;
+  private native void _drafts(String n) /*-{ this.drafts=n; }-*/;
 
-  private final native void init() /*-{
+  private native void init() /*-{
     this.labels = {};
     this.strict_labels = true;
   }-*/;

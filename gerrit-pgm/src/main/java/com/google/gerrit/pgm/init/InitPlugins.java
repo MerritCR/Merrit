@@ -68,10 +68,11 @@ public class InitPlugins implements InitStep {
       }
     });
     return FluentIterable.from(result).toSortedList(new Comparator<PluginData>() {
-      @Override
-      public int compare(PluginData a, PluginData b) {
-        return a.name.compareTo(b.name);
-      }});
+        @Override
+        public int compare(PluginData a, PluginData b) {
+          return a.name.compareTo(b.name);
+        }
+      });
   }
 
   private final ConsoleUI ui;
@@ -121,17 +122,18 @@ public class InitPlugins implements InitStep {
         Path p = site.plugins_dir.resolve(plugin.name + ".jar");
         boolean upgrade = Files.exists(p);
 
-        if (!(initFlags.installPlugins.contains(pluginName) || ui.yesno(upgrade,
-            "Install plugin %s version %s", pluginName, plugin.version))) {
+        if (!(initFlags.installPlugins.contains(pluginName)
+            || initFlags.installAllPlugins
+            || ui.yesno(upgrade, "Install plugin %s version %s", pluginName,
+                plugin.version))) {
           Files.deleteIfExists(tmpPlugin);
           continue;
         }
 
         if (upgrade) {
           final String installedPluginVersion = getVersion(p);
-          if (!ui.yesno(upgrade,
-              "version %s is already installed, overwrite it",
-              installedPluginVersion)) {
+          if (!ui.yesno(upgrade, "%s %s is already installed, overwrite it",
+              plugin.name, installedPluginVersion)) {
             Files.deleteIfExists(tmpPlugin);
             continue;
           }
@@ -144,6 +146,12 @@ public class InitPlugins implements InitStep {
         }
         try {
           Files.move(tmpPlugin, p);
+          if (upgrade) {
+            // or update that is not an upgrade
+            ui.message("Updated %s to %s\n", plugin.name, plugin.version);
+          } else {
+            ui.message("Installed %s %s\n", plugin.name, plugin.version);
+          }
         } catch (IOException e) {
           throw new IOException("Failed to install plugin " + pluginName
               + ": " + tmpPlugin.toAbsolutePath() + " -> "

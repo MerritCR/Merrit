@@ -34,6 +34,8 @@ import java.util.List;
 
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
+import javax.net.ssl.SSLParameters;
+import javax.net.ssl.SSLSocket;
 import javax.net.ssl.SSLSocketFactory;
 
 public class AuthSMTPClient extends SMTPClient {
@@ -54,6 +56,10 @@ public class AuthSMTPClient extends SMTPClient {
     }
 
     _socket_ = sslFactory(verify).createSocket(_socket_, hostname, port, true);
+
+    SSLParameters sslParams = new SSLParameters();
+    sslParams.setEndpointIdentificationAlgorithm("HTTPS");
+    ((SSLSocket)_socket_).setSSLParameters(sslParams);
 
     // XXX: Can't call _connectAction_() because SMTP server doesn't
     // give banner information again after STARTTLS, thus SMTP._connectAction_()
@@ -159,7 +165,7 @@ public class AuthSMTPClient extends SMTPClient {
     }
 
     String cmd = encodeBase64(smtpUser.getBytes(UTF_8));
-    if(sendCommand(cmd) != 334) {
+    if (sendCommand(cmd) != 334) {
       return false;
     }
 

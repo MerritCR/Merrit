@@ -444,6 +444,7 @@ public class PostReview implements RestModifyView<RevisionResource, ReviewInput>
           e.setSide(c.side == Side.PARENT ? (short) 0 : (short) 1);
           setCommentRevId(e, patchListCache, ctx.getChange(), ps);
           e.setMessage(c.message);
+          e.setTag(in.tag);
           if (c.range != null) {
             e.setRange(new CommentRange(
                 c.range.startLine,
@@ -500,6 +501,7 @@ public class PostReview implements RestModifyView<RevisionResource, ReviewInput>
       Map<String, PatchLineComment> drafts = Maps.newHashMap();
       for (PatchLineComment c : plcUtil.draftByChangeAuthor(
           ctx.getDb(), ctx.getNotes(), user.getAccountId())) {
+        c.setTag(in.tag);
         drafts.put(c.getKey().get(), c);
       }
       return drafts;
@@ -528,6 +530,7 @@ public class PostReview implements RestModifyView<RevisionResource, ReviewInput>
         PatchLineComment c, PatchSet ps) throws OrmException {
       c.setStatus(PatchLineComment.Status.PUBLISHED);
       c.setWrittenOn(ctx.getWhen());
+      c.setTag(in.tag);
       setCommentRevId(c, patchListCache, ctx.getChange(), checkNotNull(ps));
       return c;
     }
@@ -550,6 +553,37 @@ public class PostReview implements RestModifyView<RevisionResource, ReviewInput>
       }
     }
 
+    private Map<String, Short> getAllApprovals(LabelTypes labelTypes,
+        Map<String, Short> current, Map<String, Short> input) {
+      Map<String, Short> allApprovals = new HashMap<>();
+      for (LabelType lt : labelTypes.getLabelTypes()) {
+        allApprovals.put(lt.getName(), (short) 0);
+      }
+      // set approvals to existing votes
+      if (current != null) {
+        allApprovals.putAll(current);
+      }
+      // set approvals to new votes
+      if (input != null) {
+        allApprovals.putAll(input);
+      }
+      return allApprovals;
+    }
+
+    private Map<String, Short> getPreviousApprovals(
+        Map<String, Short> allApprovals, Map<String, Short> current) {
+      Map<String, Short> previous = new HashMap<>();
+      for (Map.Entry<String, Short> approval : allApprovals.entrySet()) {
+        // assume vote is 0 if there is no vote
+        if (!current.containsKey(approval.getKey())) {
+          previous.put(approval.getKey(), (short) 0);
+        } else {
+          previous.put(approval.getKey(), current.get(approval.getKey()));
+        }
+      }
+      return previous;
+    }
+
     private boolean updateLabels(ChangeContext ctx)
         throws OrmException, ResourceConflictException {
       Map<String, Short> inLabels = MoreObjects.firstNonNull(in.labels,
@@ -565,30 +599,13 @@ public class PostReview implements RestModifyView<RevisionResource, ReviewInput>
       List<PatchSetApproval> del = Lists.newArrayList();
       List<PatchSetApproval> ups = Lists.newArrayList();
       Map<String, PatchSetApproval> current = scanLabels(ctx, del);
-
-      // get all approvals in cases of quick approve vote
-      Map<String, Short> allApprovals = Collections.emptyMap();
-      if (current != null) {
-        allApprovals = approvalsByKey(current.values());
-      }
-      allApprovals.putAll(inLabels);
-
-      // get previous label votes
-      Map<String, Short> currentLabels = new HashMap<>();
-      for (Map.Entry<String, PatchSetApproval> ent : current.entrySet()) {
-        currentLabels.put(ent.getValue().getLabel(), ent.getValue().getValue());
-      }
-      Map<String, Short> previous = new HashMap<>();
-      for (Map.Entry<String, Short> ent : allApprovals.entrySet()) {
-        if (!currentLabels.containsKey(ent.getKey())) {
-          previous.put(ent.getKey(), (short)0);
-        } else {
-          previous.put(ent.getKey(), currentLabels.get(ent.getKey()));
-        }
-      }
+      LabelTypes labelTypes = ctx.getControl().getLabelTypes();
+      Map<String, Short> allApprovals = getAllApprovals(labelTypes,
+          approvalsByKey(current.values()), inLabels);
+      Map<String, Short> previous = getPreviousApprovals(allApprovals,
+          approvalsByKey(current.values()));
 
       ChangeUpdate update = ctx.getUpdate(psId);
-      LabelTypes labelTypes = ctx.getControl().getLabelTypes();
       for (Map.Entry<String, Short> ent : allApprovals.entrySet()) {
         String name = ent.getKey();
         LabelType lt = checkNotNull(labelTypes.byLabel(name), name);
@@ -610,6 +627,7 @@ public class PostReview implements RestModifyView<RevisionResource, ReviewInput>
         } else if (c != null && c.getValue() != ent.getValue()) {
           c.setValue(ent.getValue());
           c.setGranted(ctx.getWhen());
+          c.setTag(in.tag);
           ups.add(c);
           addLabelDelta(normName, c.getValue());
           oldApprovals.put(normName, previous.get(normName));
@@ -625,6 +643,7 @@ public class PostReview implements RestModifyView<RevisionResource, ReviewInput>
                   user.getAccountId(),
                   lt.getLabelId()),
               ent.getValue(), ctx.getWhen());
+          c.setTag(in.tag);
           c.setGranted(ctx.getWhen());
           ups.add(c);
           addLabelDelta(normName, c.getValue());
@@ -659,6 +678,7 @@ public class PostReview implements RestModifyView<RevisionResource, ReviewInput>
               ctx.getControl().getLabelTypes().getLabelTypes().get(0)
                   .getLabelId()),
               (short) 0, ctx.getWhen());
+          c.setTag(in.tag);
           c.setGranted(ctx.getWhen());
           ups.add(c);
         } else {
@@ -722,6 +742,7 @@ public class PostReview implements RestModifyView<RevisionResource, ReviewInput>
           user.getAccountId(),
           ctx.getWhen(),
           psId);
+      message.setTag(in.tag);
       message.setMessage(String.format(
           "Patch Set %d:%s",
           psId.get(),

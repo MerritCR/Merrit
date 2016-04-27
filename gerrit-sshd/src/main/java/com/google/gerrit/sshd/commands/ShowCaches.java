@@ -38,7 +38,6 @@ import com.google.gerrit.sshd.CommandMetaData;
 import com.google.gerrit.sshd.SshCommand;
 import com.google.gerrit.sshd.SshDaemon;
 import com.google.inject.Inject;
-import com.google.inject.Provider;
 
 import org.apache.sshd.common.io.IoAcceptor;
 import org.apache.sshd.common.io.IoSession;
@@ -84,13 +83,13 @@ final class ShowCaches extends SshCommand {
   private SshDaemon daemon;
 
   @Inject
-  private Provider<ListCaches> listCaches;
+  private ListCaches listCaches;
 
   @Inject
-  private Provider<GetSummary> getSummary;
+  private GetSummary getSummary;
 
   @Inject
-  private Provider<CurrentUser> self;
+  private CurrentUser self;
 
   @Option(name = "--width", aliases = {"-w"}, metaVar = "COLS", usage = "width of output table")
   private int columns = 80;
@@ -125,7 +124,7 @@ final class ShowCaches extends SshCommand {
     stdout.print('\n');
 
     stdout.print(String.format(//
-        "%1s %-"+nw+"s|%-21s|  %-5s |%-9s|\n" //
+        "%1s %-" + nw + "s|%-21s|  %-5s |%-9s|\n" //
         , "" //
         , "Name" //
         , "Entries" //
@@ -133,7 +132,7 @@ final class ShowCaches extends SshCommand {
         , "Hit Ratio" //
     ));
     stdout.print(String.format(//
-        "%1s %-"+nw+"s|%6s %6s %7s|  %-5s  |%-4s %-4s|\n" //
+        "%1s %-" + nw + "s|%6s %6s %7s|  %-5s  |%-4s %-4s|\n" //
         , "" //
         , "" //
         , "Mem" //
@@ -155,11 +154,11 @@ final class ShowCaches extends SshCommand {
     printDiskCaches(caches);
     stdout.print('\n');
 
-    if (self.get().getCapabilities().canMaintainServer()) {
+    if (self.getCapabilities().canMaintainServer()) {
       sshSummary();
 
       SummaryInfo summary =
-          getSummary.get().setGc(gc).setJvm(showJVM).apply(new ConfigResource());
+          getSummary.setGc(gc).setJvm(showJVM).apply(new ConfigResource());
       taskSummary(summary.taskSummary);
       memSummary(summary.memSummary);
       threadSummary(summary.threadSummary);
@@ -175,7 +174,7 @@ final class ShowCaches extends SshCommand {
   private Collection<CacheInfo> getCaches() {
     @SuppressWarnings("unchecked")
     Map<String, CacheInfo> caches =
-        (Map<String, CacheInfo>) listCaches.get().apply(new ConfigResource());
+        (Map<String, CacheInfo>) listCaches.apply(new ConfigResource());
     for (Map.Entry<String, CacheInfo> entry : caches.entrySet()) {
       CacheInfo cache = entry.getValue();
       cache.name = entry.getKey();
@@ -209,7 +208,7 @@ final class ShowCaches extends SshCommand {
 
   private void printCache(CacheInfo cache) {
     stdout.print(String.format(
-        "%1s %-"+nw+"s|%6s %6s %7s| %7s |%4s %4s|\n",
+        "%1s %-" + nw + "s|%6s %6s %7s| %7s |%4s %4s|\n",
         CacheType.DISK.equals(cache.type) ? "D" : "",
         cache.name,
         nullToEmpty(cache.entries.mem),

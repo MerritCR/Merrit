@@ -38,8 +38,21 @@ public abstract class NotesMigration {
 
   public abstract boolean writeChanges();
 
+  public abstract boolean readAccounts();
+
+  public abstract boolean writeAccounts();
+
+  /**
+   * Whether to fail when reading any data from NoteDb.
+   * <p>
+   * Used in conjunction with {@link #readChanges()} for tests.
+   */
+  public boolean failOnLoad() {
+    return false;
+  }
+
   public boolean enabled() {
-    return writeChanges()
-        || readChanges();
+    return writeChanges() || readChanges()
+        || writeAccounts() || readAccounts();
   }
 }

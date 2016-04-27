@@ -189,6 +189,7 @@ public class ChangeScreen extends Screen {
   @UiField Element actionText;
   @UiField Element actionDate;
   @UiField SimplePanel changeExtension;
+  @UiField SimplePanel relatedExtension;
 
   @UiField Actions actions;
   @UiField Labels labels;
@@ -333,6 +334,9 @@ public class ChangeScreen extends Screen {
     addExtensionPoint(
         GerritUiExtensionPoint.CHANGE_SCREEN_BELOW_CHANGE_INFO_BLOCK,
         changeExtension, change, rev);
+    addExtensionPoint(
+        GerritUiExtensionPoint.CHANGE_SCREEN_BELOW_RELATED_INFO_BLOCK,
+        relatedExtension, change, rev);
   }
 
   private void addExtensionPoint(GerritUiExtensionPoint extensionPoint,
@@ -1153,13 +1157,13 @@ public class ChangeScreen extends Screen {
         LabelInfo label = info.label(name);
         switch (label.status()) {
           case NEED:
-            statusText.setInnerText("Needs " + name);
+            statusText.setInnerText(Util.M.needs(name));
             canSubmit = false;
             break;
           case REJECT:
           case IMPOSSIBLE:
             if (label.blocking()) {
-              statusText.setInnerText("Not " + name);
+              statusText.setInnerText(Util.M.blockedOn(name));
               canSubmit = false;
             }
             break;

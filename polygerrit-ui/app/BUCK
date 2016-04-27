@@ -26,7 +26,8 @@ genrule(
   cmd = ' && '.join([
     'mkdir $TMP/polygerrit_ui',
     'cd $TMP/polygerrit_ui',
-    'mkdir -p {elements,bower_components/webcomponentsjs}',
+    'mkdir -p {fonts,elements,bower_components/webcomponentsjs}',
+    'unzip -qd fonts $(location //polygerrit-ui:fonts)',
     'unzip -qd elements $(location :gr-app)',
     'cp -rp $SRCDIR/* .',
     'unzip -p $(location //polygerrit-ui:polygerrit_components) %s>%s' % (WEBJS, WEBJS),
@@ -49,13 +50,13 @@ vulcanize(
   components = '//polygerrit-ui:polygerrit_components',
 )
 
-
 bower_components(
   name = 'test_components',
   deps = [
     '//polygerrit-ui:polygerrit_components',
     '//lib/js:iron-test-helpers',
     '//lib/js:test-fixture',
+    '//lib/js:web-component-tester',
   ],
 )
 

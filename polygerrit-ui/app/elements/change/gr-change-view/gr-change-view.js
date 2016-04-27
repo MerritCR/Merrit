@@ -23,6 +23,12 @@
      * @event title-change
      */
 
+    /**
+     * Fired if an error occurs when fetching the change data.
+     *
+     * @event page-error
+     */
+
     properties: {
       /**
        * URL params passed from the router.
@@ -198,6 +204,11 @@
             this.set('viewState.showReplyDialog', false);
           }
         }.bind(this));
+
+        this.$.jsAPI.handleEvent(this.$.jsAPI.EventType.SHOW_CHANGE, {
+          change: this._change,
+          patchNum: this._patchNum,
+        });
       }.bind(this));
     },
 
@@ -223,31 +234,6 @@
         status = this.ChangeStatus.DRAFT;
       }
       return '(' + status.toLowerCase() + ')';
-    },
-
-    _computeDetailPath: function(changeNum) {
-      return '/changes/' + changeNum + '/detail';
-    },
-
-    _computeCommitInfoPath: function(changeNum, patchNum) {
-      return this.changeBaseURL(changeNum, patchNum) + '/commit?links';
-    },
-
-    _computeCommentsPath: function(changeNum) {
-      return '/changes/' + changeNum + '/comments';
-    },
-
-    _computeProjectConfigPath: function(project) {
-      return '/projects/' + encodeURIComponent(project) + '/config';
-    },
-
-    _computeDetailQueryParams: function() {
-      var options = this.listChangesOptionsToHex(
-          this.ListChangesOption.ALL_REVISIONS,
-          this.ListChangesOption.CHANGE_ACTIONS,
-          this.ListChangesOption.DOWNLOAD_COMMANDS
-      );
-      return {O: options};
     },
 
     _computeLatestPatchNum: function(change) {
@@ -343,13 +329,49 @@
       page.show(this.changePath(this._changeNum));
     },
 
+    _handleGetChangeDetailError: function(response) {
+      this.fire('page-error', {response: response});
+    },
+
     _getDiffDrafts: function() {
       return this.$.restAPI.getDiffDrafts(this._changeNum).then(
-          function(drafts) { return this._diffDrafts = drafts; }.bind(this));
+          function(drafts) {
+            return this._diffDrafts = drafts;
+          }.bind(this));
     },
 
     _getLoggedIn: function() {
       return this.$.restAPI.getLoggedIn();
+    },
+
+    _getProjectConfig: function() {
+      return this.$.restAPI.getProjectConfig(this._change.project).then(
+          function(config) {
+            this._projectConfig = config;
+          }.bind(this));
+    },
+
+    _getChangeDetail: function() {
+      return this.$.restAPI.getChangeDetail(this._changeNum,
+          this._handleGetChangeDetailError.bind(this)).then(
+              function(change) {
+                this._change = change;
+              }.bind(this));
+    },
+
+    _getComments: function() {
+      return this.$.restAPI.getDiffComments(this._changeNum).then(
+          function(comments) {
+            this._comments = comments;
+          }.bind(this));
+    },
+
+    _getCommitInfo: function() {
+      return this.$.restAPI.getChangeCommitInfo(
+          this._changeNum, this._patchNum).then(
+              function(commitInfo) {
+                this._commitInfo = commitInfo;
+              }.bind(this));
     },
 
     _reloadDiffDrafts: function() {
@@ -362,24 +384,33 @@
     },
 
     _reload: function() {
+      this._loading = true;
+
       this._getLoggedIn().then(function(loggedIn) {
         if (!loggedIn) { return; }
 
         this._reloadDiffDrafts();
       }.bind(this));
 
-      var detailCompletes = this.$.detailXHR.generateRequest().completes;
-      this.$.commentsXHR.generateRequest();
+      var detailCompletes = this._getChangeDetail().then(function() {
+        this._loading = false;
+      }.bind(this));
+      this._getComments();
 
       var reloadPatchNumDependentResources = function() {
         return Promise.all([
-          this.$.commitInfoXHR.generateRequest().completes,
+          this._getCommitInfo(),
           this.$.actions.reload(),
           this.$.fileList.reload(),
         ]);
       }.bind(this);
       var reloadDetailDependentResources = function() {
-        return this.$.relatedChanges.reload();
+        if (!this._change) { return Promise.resolve(); }
+
+        return Promise.all([
+          this.$.relatedChanges.reload(),
+          this._getProjectConfig(),
+        ]);
       }.bind(this);
 
       this._resetHeaderEl();

@@ -55,6 +55,7 @@ import java.util.List;
 public class SideBySide extends DiffScreen {
   interface Binder extends UiBinder<FlowPanel, SideBySide> {}
   private static final Binder uiBinder = GWT.create(Binder.class);
+  private static final String LINE_NUMBER_CLASSNAME = "CodeMirror-linenumber";
 
   @UiField(provided = true)
   SideBySideTable diffTable;
@@ -66,7 +67,6 @@ public class SideBySide extends DiffScreen {
 
   private SideBySideChunkManager chunkManager;
   private SideBySideCommentManager commentManager;
-  private SideBySideSkipManager skipManager;
 
   public SideBySide(
       PatchSet.Id base,
@@ -94,6 +94,7 @@ public class SideBySide extends DiffScreen {
             getChangeStatus().isOpen());
         setTheme(result.getTheme());
         display(comments);
+        header.setupPrevNextFiles(comments);
       }
     };
   }
@@ -111,18 +112,18 @@ public class SideBySide extends DiffScreen {
         cmB.refresh();
       }
     });
-    setLineLength(Patch.COMMIT_MSG.equals(prefs) ? 72 : prefs.lineLength());
+    setLineLength(Patch.COMMIT_MSG.equals(path) ? 72 : prefs.lineLength());
     diffTable.refresh();
 
     if (getStartLine() == 0) {
       DiffChunkInfo d = chunkManager.getFirst();
       if (d != null) {
-        if (d.isEdit() && d.getSide() == DisplaySide.A) {
+        if (d.edit && d.side == DisplaySide.A) {
           setStartSide(DisplaySide.B);
-          setStartLine(lineOnOther(d.getSide(), d.getStart()).getLine() + 1);
+          setStartLine(lineOnOther(d.side, d.start).getLine() + 1);
         } else {
-          setStartSide(d.getSide());
-          setStartLine(d.getStart() + 1);
+          setStartSide(d.side);
+          setStartLine(d.start + 1);
         }
       }
     }
@@ -185,18 +186,22 @@ public class SideBySide extends DiffScreen {
     setThemeStyles(prefs.theme().isDark());
     setShowIntraline(prefs.intralineDifference());
     if (prefs.showLineNumbers()) {
-      diffTable.addStyleName(SideBySideTable.style.showLineNumbers());
+      diffTable.addStyleName(Resources.I.diffTableStyle().showLineNumbers());
     }
 
     cmA = newCm(diff.metaA(), diff.textA(), diffTable.cmA);
     cmB = newCm(diff.metaB(), diff.textB(), diffTable.cmB);
+
+    boolean reviewingBase = base == null;
+    getDiffTable().setUpBlameIconA(cmA, reviewingBase,
+        reviewingBase ? revision : base, path);
+    getDiffTable().setUpBlameIconB(cmB, revision, path);
 
     cmA.extras().side(DisplaySide.A);
     cmB.extras().side(DisplaySide.B);
     setShowTabs(prefs.showTabs());
 
     chunkManager = new SideBySideChunkManager(this, cmA, cmB, diffTable.scrollbar);
-    skipManager = new SideBySideSkipManager(this, commentManager);
 
     operation(new Runnable() {
       @Override
@@ -216,7 +221,7 @@ public class SideBySide extends DiffScreen {
     registerCmEvents(cmA);
     registerCmEvents(cmB);
     scrollSynchronizer = new ScrollSynchronizer(diffTable, cmA, cmB,
-            chunkManager.getLineMapper());
+            chunkManager.lineMapper);
 
     setPrefsAction(new PreferencesAction(this, prefs));
     header.init(getPrefsAction(), getUnifiedDiffLink(), diff.sideBySideWebLinks());
@@ -261,13 +266,10 @@ public class SideBySide extends DiffScreen {
 
   @Override
   void setShowLineNumbers(boolean b) {
+    super.setShowLineNumbers(b);
+
     cmA.setOption("lineNumbers", b);
     cmB.setOption("lineNumbers", b);
-    if (b) {
-      diffTable.addStyleName(SideBySideTable.style.showLineNumbers());
-    } else {
-      diffTable.removeStyleName(SideBySideTable.style.showLineNumbers());
-    }
   }
 
   @Override
@@ -306,6 +308,11 @@ public class SideBySide extends DiffScreen {
   @Override
   CodeMirror getCmFromSide(DisplaySide side) {
     return side == DisplaySide.A ? cmA : cmB;
+  }
+
+  @Override
+  int getCmLine(int line, DisplaySide side) {
+    return line;
   }
 
   @Override
@@ -412,7 +419,12 @@ public class SideBySide extends DiffScreen {
   }
 
   @Override
-  SideBySideSkipManager getSkipManager() {
-    return skipManager;
+  boolean isSideBySide() {
+    return true;
+  }
+
+  @Override
+  String getLineNumberClassName() {
+    return LINE_NUMBER_CLASSNAME;
   }
 }

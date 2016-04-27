@@ -88,7 +88,6 @@ import com.google.gerrit.client.documentation.DocScreen;
 import com.google.gerrit.client.editor.EditScreen;
 import com.google.gerrit.client.groups.GroupApi;
 import com.google.gerrit.client.groups.GroupInfo;
-import com.google.gerrit.client.patches.UnifiedPatchScreen;
 import com.google.gerrit.client.rpc.GerritCallback;
 import com.google.gerrit.client.rpc.RestApi;
 import com.google.gerrit.client.ui.Screen;
@@ -107,18 +106,23 @@ import com.google.gwtexpui.user.client.UserAgent;
 import com.google.gwtorm.client.KeyUtil;
 
 public class Dispatcher {
+  public static String toPatch(PatchSet.Id diffBase,
+      PatchSet.Id revision, String fileName) {
+    return toPatch("", diffBase, revision, fileName, null, 0);
+  }
+
+  public static String toPatch(PatchSet.Id diffBase,
+      PatchSet.Id revision, String fileName, DisplaySide side, int line) {
+    return toPatch("", diffBase, revision, fileName, side, line);
+  }
+
   public static String toSideBySide(PatchSet.Id diffBase, Patch.Key id) {
-    return toPatch("", diffBase, id);
+    return toPatch("sidebyside", diffBase, id);
   }
 
   public static String toSideBySide(PatchSet.Id diffBase,
       PatchSet.Id revision, String fileName) {
     return toPatch("sidebyside", diffBase, revision, fileName, null, 0);
-  }
-
-  public static String toSideBySide(PatchSet.Id diffBase,
-      PatchSet.Id revision, String fileName, DisplaySide side, int line) {
-    return toPatch("sidebyside", diffBase, revision, fileName, side, line);
   }
 
   public static String toUnified(PatchSet.Id diffBase,
@@ -420,7 +424,7 @@ public class Dispatcher {
       int line = 0;
       int at = rest.lastIndexOf('@');
       if (at > 0) {
-        String l = rest.substring(at+1);
+        String l = rest.substring(at + 1);
         if (l.startsWith("a")) {
           side = DisplaySide.A;
           l = l.substring(1);
@@ -472,7 +476,7 @@ public class Dispatcher {
     }
 
     if ("".equals(panel) || /* DEPRECATED URL */"cm".equals(panel)) {
-      if (preferUnified() || (UserAgent.isPortrait() && UserAgent.isMobile())) {
+      if (preferUnified()) {
         unified(token, baseId, id, side, line);
       } else {
         codemirror(token, baseId, id, side, line, false);
@@ -481,8 +485,6 @@ public class Dispatcher {
       codemirror(token, baseId, id, side, line, false);
     } else if ("unified".equals(panel)) {
       unified(token, baseId, id, side, line);
-    } else if ("unified1".equals(panel)) {
-      unified1(token, baseId, id);
     } else if ("edit".equals(panel)) {
       codemirror(token, null, id, side, line, true);
     } else {
@@ -491,7 +493,8 @@ public class Dispatcher {
   }
 
   private static boolean preferUnified() {
-    return DiffView.UNIFIED_DIFF.equals(Gerrit.getUserPreferences().diffView());
+    return DiffView.UNIFIED_DIFF.equals(Gerrit.getUserPreferences().diffView())
+        || (UserAgent.isPortrait() && UserAgent.isMobile());
   }
 
   private static void unified(final String token, final PatchSet.Id baseId,
@@ -501,18 +504,6 @@ public class Dispatcher {
       public void onSuccess() {
         Gerrit.display(token,
             new Unified(baseId, id.getParentKey(), id.get(), side, line));
-      }
-    });
-  }
-
-  private static void unified1(final String token,
-      final PatchSet.Id baseId,
-      final Patch.Key id) {
-    GWT.runAsync(new AsyncSplit(token) {
-      @Override
-      public void onSuccess() {
-        UnifiedPatchScreen.TopView top = Gerrit.getPatchScreenTopView();
-        Gerrit.display(token, new UnifiedPatchScreen(id, top, baseId));
       }
     });
   }

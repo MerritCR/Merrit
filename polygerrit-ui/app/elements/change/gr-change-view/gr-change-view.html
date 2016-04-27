@@ -18,10 +18,10 @@ limitations under the License.
 <link rel="import" href="../../../behaviors/keyboard-shortcut-behavior.html">
 <link rel="import" href="../../../behaviors/rest-client-behavior.html">
 <link rel="import" href="../../shared/gr-account-link/gr-account-link.html">
-<link rel="import" href="../../shared/gr-ajax/gr-ajax.html">
 <link rel="import" href="../../shared/gr-button/gr-button.html">
 <link rel="import" href="../../shared/gr-change-star/gr-change-star.html">
 <link rel="import" href="../../shared/gr-date-formatter/gr-date-formatter.html">
+<link rel="import" href="../../shared/gr-js-api-interface/gr-js-api-interface.html">
 <link rel="import" href="../../shared/gr-linked-text/gr-linked-text.html">
 <link rel="import" href="../../shared/gr-overlay/gr-overlay.html">
 <link rel="import" href="../../shared/gr-rest-api-interface/gr-rest-api-interface.html">
@@ -37,14 +37,12 @@ limitations under the License.
 <dom-module id="gr-change-view">
   <template>
     <style>
-      .container {
-        margin: 1em var(--default-horizontal-margin);
-      }
       .container:not(.loading) {
         background-color: var(--view-background-color);
       }
       .container.loading {
         color: #666;
+        padding: 1em var(--default-horizontal-margin);
       }
       .headerContainer {
         height: 4.1em;
@@ -64,7 +62,7 @@ limitations under the License.
         position: fixed;
         top: 0;
         transition: box-shadow 250ms linear;
-        width: calc(100% - (2 * var(--default-horizontal-margin)));
+        width: 100%;
       }
       .header-title {
         flex: 1;
@@ -138,35 +136,28 @@ limitations under the License.
         align-content: flex-start;
         display: flex;
         flex: 1;
-        flex-wrap: wrap;
         overflow-x: hidden;
+      }
+      .relatedChanges {
+        flex: 1 1 auto;
+        font-size: .9em;
+        overflow: hidden;
       }
       gr-file-list {
         margin-bottom: 1em;
         padding: 0 var(--default-horizontal-margin);
       }
       @media screen and (max-width: 50em) {
-        .container {
-          margin: .5em 0 !important;
-        }
-        .container.loading {
-          margin: 1em var(--default-horizontal-margin) !important;
-        }
         .headerContainer {
           height: 5.15em;
         }
         .header {
           align-items: flex-start;
           flex-direction: column;
-          padding: .5em var(--default-horizontal-margin) !important;
+          padding: .5em var(--default-horizontal-margin);
         }
         gr-change-star {
           vertical-align: middle;
-        }
-        .header-title,
-        .header-actions,
-        .header.pinned {
-          width: 100% !important;
         }
         .header-title {
           font-size: 1.1em;
@@ -185,15 +176,15 @@ limitations under the License.
           display: none;
         }
         .patchSelectLabel {
-          margin-left: 0 !important;
+          margin-left: 0;
           margin-right: .5em;
         }
         .header select {
-          margin-left: 0 !important;
+          margin-left: 0;
           margin-right: .5em;
         }
         .header .reply {
-          margin-left: 0 !important;
+          margin-left: 0;
           margin-right: .5em;
         }
         .changeInfo-column:not(:last-of-type) {
@@ -205,8 +196,11 @@ limitations under the License.
           flex-direction: column;
           flex-wrap: nowrap;
         }
+        .relatedChanges,
         .changeMetadata {
           font-size: 1em;
+        }
+        .changeMetadata {
           border-right: none;
           margin-bottom: 1em;
           margin-top: .25em;
@@ -218,22 +212,6 @@ limitations under the License.
         }
       }
     </style>
-    <gr-ajax id="detailXHR"
-        url="[[_computeDetailPath(_changeNum)]]"
-        params="[[_computeDetailQueryParams()]]"
-        last-response="{{_change}}"
-        loading="{{_loading}}"></gr-ajax>
-    <gr-ajax id="commentsXHR"
-        url="[[_computeCommentsPath(_changeNum)]]"
-        last-response="{{_comments}}"></gr-ajax>
-    <gr-ajax id="commitInfoXHR"
-        url="[[_computeCommitInfoPath(_changeNum, _patchNum)]]"
-        last-response="{{_commitInfo}}"></gr-ajax>
-    <!-- TODO(andybons): Cache the project config. -->
-    <gr-ajax id="configXHR"
-        auto
-        url="[[_computeProjectConfigPath(_change.project)]]"
-        last-response="{{_projectConfig}}"></gr-ajax>
     <div class="container loading" hidden$="{{!_loading}}">Loading...</div>
     <div class="container" hidden$="{{_loading}}">
       <div class="headerContainer">
@@ -328,6 +306,7 @@ limitations under the License.
           on-cancel="_handleReplyCancel"
           hidden$="[[!_loggedIn]]">Reply</gr-reply-dialog>
     </gr-overlay>
+    <gr-js-api-interface id="jsAPI"></gr-js-api-interface>
     <gr-rest-api-interface id="restAPI"></gr-rest-api-interface>
   </template>
   <script src="gr-change-view.js"></script>

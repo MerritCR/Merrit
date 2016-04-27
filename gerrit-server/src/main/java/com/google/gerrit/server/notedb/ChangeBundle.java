@@ -22,12 +22,13 @@ import static com.google.gerrit.reviewdb.server.ReviewDbUtil.intKeyOrdering;
 import static com.google.gerrit.server.notedb.ChangeBundle.Source.NOTE_DB;
 import static com.google.gerrit.server.notedb.ChangeBundle.Source.REVIEW_DB;
 
-import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Joiner;
 import com.google.common.collect.ComparisonChain;
+import com.google.common.collect.ImmutableCollection;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Iterables;
+import com.google.common.collect.Lists;
 import com.google.common.collect.Ordering;
 import com.google.common.collect.Sets;
 import com.google.gerrit.reviewdb.client.Change;
@@ -215,15 +216,20 @@ public class ChangeBundle {
     // Initialization-time checks that the column set hasn't changed since the
     // last time this file was updated.
     checkColumns(Change.Id.class, 1);
-    checkColumns(Change.class, 1, 2, 3, 4, 5, 7, 8, 10, 12, 13, 14, 17, 18);
+
+    checkColumns(Change.class,
+        1, 2, 3, 4, 5, 7, 8, 10, 12, 13, 14, 17, 18,
+        // TODO(dborowitz): It's potentially possible to compare noteDbState in
+        // the Change with the state implied by a ChangeNotes.
+        101);
     checkColumns(ChangeMessage.Key.class, 1, 2);
-    checkColumns(ChangeMessage.class, 1, 2, 3, 4, 5);
+    checkColumns(ChangeMessage.class, 1, 2, 3, 4, 5, 6);
     checkColumns(PatchSet.Id.class, 1, 2);
     checkColumns(PatchSet.class, 1, 2, 3, 4, 5, 6, 8);
     checkColumns(PatchSetApproval.Key.class, 1, 2, 3);
-    checkColumns(PatchSetApproval.class, 1, 2, 3);
+    checkColumns(PatchSetApproval.class, 1, 2, 3, 6);
     checkColumns(PatchLineComment.Key.class, 1, 2);
-    checkColumns(PatchLineComment.class, 1, 2, 3, 4, 5, 6, 7, 8, 9);
+    checkColumns(PatchLineComment.class, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10);
   }
 
   private final Change change;
@@ -235,8 +241,7 @@ public class ChangeBundle {
       patchLineComments;
   private final Source source;
 
-  @VisibleForTesting
-  ChangeBundle(
+  public ChangeBundle(
       Change change,
       Iterable<ChangeMessage> changeMessages,
       Iterable<PatchSet> patchSets,
@@ -271,6 +276,26 @@ public class ChangeBundle {
     return change;
   }
 
+  public ImmutableCollection<ChangeMessage> getChangeMessages() {
+    return changeMessages;
+  }
+
+  public ImmutableCollection<PatchSet> getPatchSets() {
+    return patchSets.values();
+  }
+
+  public ImmutableCollection<PatchSetApproval> getPatchSetApprovals() {
+    return patchSetApprovals.values();
+  }
+
+  public ImmutableCollection<PatchLineComment> getPatchLineComments() {
+    return patchLineComments.values();
+  }
+
+  public Source getSource() {
+    return source;
+  }
+
   public ImmutableList<String> differencesFrom(ChangeBundle o) {
     List<String> diffs = new ArrayList<>();
     diffChanges(diffs, this, o);
@@ -286,7 +311,8 @@ public class ChangeBundle {
     Change a = bundleA.change;
     Change b = bundleB.change;
     String desc = a.getId().equals(b.getId()) ? describe(a.getId()) : "Changes";
-    diffColumns(diffs, Change.class, desc, bundleA, a, bundleB, b);
+    diffColumnsExcluding(diffs, Change.class, desc, bundleA, a, bundleB, b,
+        "rowVersion", "noteDbState");
   }
 
   private static void diffChangeMessages(List<String> diffs,
@@ -307,8 +333,7 @@ public class ChangeBundle {
       return;
     }
 
-    // At least one is from NoteDb, so we need to ignore UUIDs for both, and
-    // allow timestamp slop if the sources differ.
+    // At least one is from NoteDb, so comparisons are inexact as noted below.
     Change.Id id = bundleA.getChange().getId();
     checkArgument(id.equals(bundleB.getChange().getId()));
     List<ChangeMessage> as = bundleA.changeMessages;
@@ -324,8 +349,25 @@ public class ChangeBundle {
       ChangeMessage a = as.get(i);
       ChangeMessage b = bs.get(i);
       String desc = "ChangeMessage on " + id + " at index " + i;
+
+      // Ignore null PatchSet.Id on a ReviewDb change; all entities in NoteDb
+      // have a PatchSet.Id.
+      boolean checkPsId = true;
+      if (bundleA.source == REVIEW_DB) {
+        checkPsId = a.getPatchSetId() != null;
+      } else if (bundleB.source == REVIEW_DB) {
+        checkPsId = b.getPatchSetId() != null;
+      }
+
+      // Ignore UUIDs for both sides.
+      List<String> exclude = Lists.newArrayList("key");
+      if (!checkPsId) {
+        exclude.add("patchset");
+      }
+
+      // Normal column-wise diff also allows timestamp slop.
       diffColumnsExcluding(diffs, ChangeMessage.class, desc, bundleA, a,
-          bundleB, b, "key");
+          bundleB, b, exclude);
     }
   }
 
@@ -392,7 +434,14 @@ public class ChangeBundle {
   private static <T> void diffColumnsExcluding(List<String> diffs,
       Class<T> clazz, String desc, ChangeBundle bundleA, T a,
       ChangeBundle bundleB, T b, String... exclude) {
-    Set<String> toExclude = Sets.newLinkedHashSet(Arrays.asList(exclude));
+    diffColumnsExcluding(diffs, clazz, desc, bundleA, a, bundleB, b,
+        Arrays.asList(exclude));
+  }
+
+  private static <T> void diffColumnsExcluding(List<String> diffs,
+      Class<T> clazz, String desc, ChangeBundle bundleA, T a,
+      ChangeBundle bundleB, T b, Iterable<String> exclude) {
+    Set<String> toExclude = Sets.newLinkedHashSet(exclude);
     for (Field f : clazz.getDeclaredFields()) {
       Column col = f.getAnnotation(Column.class);
       if (col == null) {
@@ -422,7 +471,8 @@ public class ChangeBundle {
     checkArgument(a.getClass() == b.getClass());
     Class<?> clazz = a.getClass();
 
-    Timestamp ta, tb;
+    Timestamp ta;
+    Timestamp tb;
     try {
       Field f = clazz.getDeclaredField(field);
       checkArgument(f.getAnnotation(Column.class) != null);
@@ -451,7 +501,7 @@ public class ChangeBundle {
         "%s from NoteDb has non-rounded %s timestamp: %s",
         desc, field, tsFromNoteDb);
     long delta = tsFromReviewDb.getTime() - tsFromNoteDb.getTime();
-    long max = ChangeRebuilder.MAX_WINDOW_MS;
+    long max = ChangeRebuilderImpl.MAX_WINDOW_MS;
     if (delta < 0 || delta > max) {
       diffs.add(
           field + " differs for " + desc + " in NoteDb vs. ReviewDb:"

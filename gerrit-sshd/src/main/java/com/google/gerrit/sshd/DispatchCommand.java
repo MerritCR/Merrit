@@ -15,6 +15,7 @@
 package com.google.gerrit.sshd;
 
 import com.google.common.base.Strings;
+import com.google.common.base.Throwables;
 import com.google.common.collect.Sets;
 import com.google.common.util.concurrent.Atomics;
 import com.google.gerrit.extensions.restapi.AuthException;
@@ -22,7 +23,6 @@ import com.google.gerrit.server.CurrentUser;
 import com.google.gerrit.server.account.CapabilityUtils;
 import com.google.gerrit.server.args4j.SubcommandHandler;
 import com.google.inject.Inject;
-import com.google.inject.Provider;
 import com.google.inject.assistedinject.Assisted;
 
 import org.apache.sshd.server.Command;
@@ -44,7 +44,7 @@ final class DispatchCommand extends BaseCommand {
     DispatchCommand create(Map<String, CommandProvider> map);
   }
 
-  private final Provider<CurrentUser> currentUser;
+  private final CurrentUser currentUser;
   private final Map<String, CommandProvider> commands;
   private final AtomicReference<Command> atomicCmd;
 
@@ -55,7 +55,7 @@ final class DispatchCommand extends BaseCommand {
   private List<String> args = new ArrayList<>();
 
   @Inject
-  DispatchCommand(final Provider<CurrentUser> cu,
+  DispatchCommand(CurrentUser cu,
       @Assisted final Map<String, CommandProvider> all) {
     currentUser = cu;
     commands = all;
@@ -133,7 +133,12 @@ final class DispatchCommand extends BaseCommand {
   public void destroy() {
     Command cmd = atomicCmd.getAndSet(null);
     if (cmd != null) {
+      try {
         cmd.destroy();
+      } catch (Exception e) {
+        Throwables.propagateIfPossible(e);
+        throw new RuntimeException(e);
+      }
     }
   }
 

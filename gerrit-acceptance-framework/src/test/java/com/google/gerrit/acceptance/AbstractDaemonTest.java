@@ -201,9 +201,10 @@ public abstract class AbstractDaemonTest {
   protected GerritServer server;
   protected TestAccount admin;
   protected TestAccount user;
-  protected RestSession adminSession;
-  protected RestSession userSession;
-  protected SshSession sshSession;
+  protected RestSession adminRestSession;
+  protected RestSession userRestSession;
+  protected SshSession adminSshSession;
+  protected SshSession userSshSession;
   protected ReviewDb db;
   protected Project.NameKey project;
 
@@ -300,14 +301,18 @@ public abstract class AbstractDaemonTest {
     accountCache.evict(admin.getId());
     accountCache.evict(user.getId());
 
-    adminSession = new RestSession(server, admin);
-    userSession = new RestSession(server, user);
+    adminRestSession = new RestSession(server, admin);
+    userRestSession = new RestSession(server, user);
     initSsh(admin);
     db = reviewDbProvider.open();
-    Context ctx = newRequestContext(admin);
+    Context ctx = newRequestContext(user);
     atrScope.set(ctx);
-    sshSession = ctx.getSession();
-    sshSession.open();
+    userSshSession = ctx.getSession();
+    userSshSession.open();
+    ctx = newRequestContext(admin);
+    atrScope.set(ctx);
+    adminSshSession = ctx.getSession();
+    adminSshSession.open();
     resourcePrefix = UNSAFE_PROJECT_NAME.matcher(
         description.getClassName() + "_"
         + description.getMethodName() + "_").replaceAll("");
@@ -423,7 +428,8 @@ public abstract class AbstractDaemonTest {
       repo.close();
     }
     db.close();
-    sshSession.close();
+    adminSshSession.close();
+    userSshSession.close();
     if (server != commonServer) {
       server.stop();
     }
@@ -516,7 +522,7 @@ public abstract class AbstractDaemonTest {
   }
 
   private Context newRequestContext(TestAccount account) {
-    return atrScope.newContext(reviewDbProvider, new SshSession(server, admin),
+    return atrScope.newContext(reviewDbProvider, new SshSession(server, account),
         identifiedUserFactory.create(Providers.of(db), account.getId()));
   }
 
@@ -527,6 +533,16 @@ public abstract class AbstractDaemonTest {
   protected Context setApiUserAnonymous() {
     return atrScope.set(
         atrScope.newContext(reviewDbProvider, null, anonymousUser.get()));
+  }
+
+  protected Context disableDb() {
+    notesMigration.setFailOnLoad(true);
+    return atrScope.disableDb();
+  }
+
+  protected void enableDb(Context preDisableContext) {
+    notesMigration.setFailOnLoad(false);
+    atrScope.set(preDisableContext);
   }
 
   protected static Gson newGson() {
@@ -615,6 +631,10 @@ public abstract class AbstractDaemonTest {
       cfg.commit(md);
     }
     projectCache.evict(cfg.getProject());
+  }
+
+  protected void saveProjectConfig(ProjectConfig cfg) throws Exception {
+    saveProjectConfig(project, cfg);
   }
 
   protected void grant(String permission, Project.NameKey project, String ref)

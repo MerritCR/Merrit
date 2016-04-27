@@ -32,7 +32,6 @@ import com.google.gerrit.extensions.restapi.ResourceConflictException;
 import com.google.gerrit.extensions.restapi.RestApiException;
 import com.google.gerrit.reviewdb.client.AccountGroup;
 import com.google.gerrit.reviewdb.client.Branch;
-import com.google.gerrit.server.git.MetaDataUpdate;
 import com.google.gerrit.server.git.ProjectConfig;
 import com.google.gerrit.server.group.SystemGroupBackend;
 import com.google.gerrit.server.project.Util;
@@ -45,7 +44,7 @@ import org.junit.Test;
 @NoHttpd
 public class MoveChangeIT extends AbstractDaemonTest {
   @Test
-  public void moveChange_shortRef() throws Exception {
+  public void moveChangeWithShortRef() throws Exception {
     // Move change to a different branch using short ref name
     PushOneCommit.Result r = createChange();
     Branch.NameKey newBranch =
@@ -56,7 +55,7 @@ public class MoveChangeIT extends AbstractDaemonTest {
   }
 
   @Test
-  public void moveChange_fullRef() throws Exception {
+  public void moveChangeWithFullRef() throws Exception {
     // Move change to a different branch using full ref name
     PushOneCommit.Result r = createChange();
     Branch.NameKey newBranch =
@@ -94,7 +93,7 @@ public class MoveChangeIT extends AbstractDaemonTest {
   }
 
   @Test
-  public void moveChange_sameChangeId() throws Exception {
+  public void moveChangeToSameChangeId() throws Exception {
     // Move change to a branch with existing change with same change ID
     PushOneCommit.Result r = createChange();
     Branch.NameKey newBranch =
@@ -160,7 +159,7 @@ public class MoveChangeIT extends AbstractDaemonTest {
   }
 
   @Test
-  public void moveChangeToBranch_WithoutUploadPerms() throws Exception {
+  public void moveChangeToBranchWithoutUploadPerms() throws Exception {
     // Move change to a destination where user doesn't have upload permissions
     PushOneCommit.Result r = createChange();
     Branch.NameKey newBranch =
@@ -175,7 +174,7 @@ public class MoveChangeIT extends AbstractDaemonTest {
   }
 
   @Test
-  public void moveChangeFromBranch_WithoutAbandonPerms() throws Exception {
+  public void moveChangeFromBranchWithoutAbandonPerms() throws Exception {
     // Move change for which user does not have abandon permissions
     PushOneCommit.Result r = createChange();
     Branch.NameKey newBranch =
@@ -218,7 +217,7 @@ public class MoveChangeIT extends AbstractDaemonTest {
   }
 
   @Test
-  public void moveChange_WithCurrentPatchSetLocked() throws Exception {
+  public void moveChangeWithCurrentPatchSetLocked() throws Exception {
     // Move change that is locked
     PushOneCommit.Result r = createChange();
     Branch.NameKey newBranch =
@@ -241,12 +240,6 @@ public class MoveChangeIT extends AbstractDaemonTest {
     move(r.getChangeId(), newBranch.get());
   }
 
-  private void saveProjectConfig(ProjectConfig cfg) throws Exception {
-    try (MetaDataUpdate md = metaDataUpdateFactory.create(project)) {
-      cfg.commit(md);
-    }
-  }
-
   private void move(int changeNum, String destination)
       throws RestApiException {
     gApi.changes().id(changeNum).move(destination);
@@ -260,7 +253,7 @@ public class MoveChangeIT extends AbstractDaemonTest {
   private void move(String changeId, String destination, String message)
       throws RestApiException {
     MoveInput in = new MoveInput();
-    in.destination_branch = destination;
+    in.destinationBranch = destination;
     in.message = message;
     gApi.changes().id(changeId).move(in);
   }

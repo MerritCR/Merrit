@@ -59,44 +59,16 @@ public class ChangeSchemaDefinitions extends SchemaDefinitions<ChangeData> {
       ChangeField.COMMITTER);
 
   @Deprecated
-  static final Schema<ChangeData> V26 = schema(
-      ChangeField.LEGACY_ID,
-      ChangeField.ID,
-      ChangeField.STATUS,
-      ChangeField.PROJECT,
-      ChangeField.PROJECTS,
-      ChangeField.REF,
-      ChangeField.EXACT_TOPIC,
-      ChangeField.FUZZY_TOPIC,
-      ChangeField.UPDATED,
-      ChangeField.FILE_PART,
-      ChangeField.PATH,
-      ChangeField.OWNER,
-      ChangeField.REVIEWER,
-      ChangeField.COMMIT,
-      ChangeField.TR,
-      ChangeField.LABEL,
-      ChangeField.COMMIT_MESSAGE,
-      ChangeField.COMMENT,
-      ChangeField.CHANGE,
-      ChangeField.APPROVAL,
-      ChangeField.MERGEABLE,
-      ChangeField.ADDED,
-      ChangeField.DELETED,
-      ChangeField.DELTA,
-      ChangeField.HASHTAG,
-      ChangeField.COMMENTBY,
-      ChangeField.PATCH_SET,
-      ChangeField.GROUP,
-      ChangeField.SUBMISSIONID,
-      ChangeField.EDITBY,
-      ChangeField.REVIEWEDBY,
-      ChangeField.EXACT_COMMIT,
-      ChangeField.AUTHOR,
-      ChangeField.COMMITTER,
-      ChangeField.DRAFTBY);
+  static final Schema<ChangeData> V26 = schema(V25, ChangeField.DRAFTBY);
 
+  @Deprecated
   static final Schema<ChangeData> V27 = schema(V26.getFields().values());
+
+  @Deprecated
+  static final Schema<ChangeData> V28 = schema(V27, ChangeField.STARREDBY);
+
+  static final Schema<ChangeData> V29 =
+      schema(V28, ChangeField.HASHTAG_CASE_AWARE);
 
   public static final ChangeSchemaDefinitions INSTANCE =
       new ChangeSchemaDefinitions();

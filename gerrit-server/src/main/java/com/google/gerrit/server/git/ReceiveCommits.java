@@ -63,6 +63,7 @@ import com.google.gerrit.common.data.Permission;
 import com.google.gerrit.common.data.PermissionRule;
 import com.google.gerrit.extensions.api.changes.HashtagsInput;
 import com.google.gerrit.extensions.api.changes.ReviewInput.NotifyHandling;
+import com.google.gerrit.extensions.api.changes.SubmitInput;
 import com.google.gerrit.extensions.registration.DynamicMap;
 import com.google.gerrit.extensions.registration.DynamicMap.Entry;
 import com.google.gerrit.extensions.registration.DynamicSet;
@@ -192,6 +193,11 @@ public class ReceiveCommits {
   private static final String COMMAND_REJECTION_MESSAGE_FOOTER =
       "Please read the documentation and contact an administrator\n"
           + "if you feel the configuration is incorrect";
+
+  private static final String SAME_CHANGE_ID_IN_MULTIPLE_CHANGES =
+      "same Change-Id in multiple changes.\n"
+          + "Squash the commits with the same Change-Id or "
+          + "ensure Change-Ids are unique for each commit";
 
   private enum Error {
         CONFIG_UPDATE("You are not allowed to perform this operation.\n"
@@ -691,7 +697,8 @@ public class ReceiveCommits {
       addMessage("");
       addMessage("New Changes:");
       for (CreateRequest c : created) {
-        addMessage(formatChangeUrl(canonicalWebUrl, c.change, false));
+        addMessage(formatChangeUrl(canonicalWebUrl, c.change,
+            c.change.getSubject(), false));
       }
       addMessage("");
     }
@@ -716,20 +723,21 @@ public class ReceiveCommits {
       addMessage("Updated Changes:");
       boolean edit = magicBranch != null && magicBranch.edit;
       for (ReplaceRequest u : updated) {
-        addMessage(formatChangeUrl(canonicalWebUrl, u.change, edit));
+        addMessage(formatChangeUrl(canonicalWebUrl, u.change,
+            u.info.getSubject(), edit));
       }
       addMessage("");
     }
   }
 
   private static String formatChangeUrl(String url, Change change,
-      boolean edit) {
+      String subject, boolean edit) {
     StringBuilder m = new StringBuilder()
         .append("  ")
         .append(url)
         .append(change.getChangeId())
         .append(" ")
-        .append(ChangeUtil.cropSubject(change.getSubject()));
+        .append(ChangeUtil.cropSubject(subject));
     if (change.getStatus() == Change.Status.DRAFT) {
       m.append(" [DRAFT]");
     }
@@ -1127,6 +1135,7 @@ public class ReceiveCommits {
     Set<Account.Id> reviewer = Sets.newLinkedHashSet();
     Set<Account.Id> cc = Sets.newLinkedHashSet();
     Map<String, Short> labels = new HashMap<>();
+    String message;
     List<RevCommit> baseCommit;
     LabelTypes labelTypes;
     CmdLineParser clp;
@@ -1181,6 +1190,13 @@ public class ReceiveCommits {
         throw clp.reject(e.getMessage());
       }
       labels.put(v.label(), v.value());
+    }
+
+    @Option(name = "--message", aliases = {"-m"}, metaVar = "MESSAGE",
+        usage = "Comment message to apply to the review")
+    void addMessage(final String token) {
+      // git push does not allow spaces in refs.
+      message = token.replace("_", " ");
     }
 
     @Option(name = "--hashtag", aliases = {"-t"}, metaVar = "HASHTAG",
@@ -1582,7 +1598,7 @@ public class ReceiveCommits {
 
       for (ChangeLookup p : pending) {
         if (newChangeIds.contains(p.changeKey)) {
-          reject(magicBranch.cmd, "squash commits first");
+          reject(magicBranch.cmd, SAME_CHANGE_ID_IN_MULTIPLE_CHANGES);
           newChanges = Collections.emptyList();
           return;
         }
@@ -1750,8 +1766,12 @@ public class ReceiveCommits {
       recipients.add(getRecipientsFromFooters(
           accountResolver, magicBranch.draft, footerLines));
       recipients.remove(me);
-      String msg = renderMessageWithApprovals(psId.get(), null,
-          approvals, Collections.<String, PatchSetApproval> emptyMap());
+      StringBuilder msg =
+          new StringBuilder(ApprovalsUtil.renderMessageWithApprovals(psId.get(),
+              approvals, Collections.<String, PatchSetApproval> emptyMap()));
+      if (!Strings.isNullOrEmpty(magicBranch.message)) {
+        msg.append("\n").append(magicBranch.message);
+      }
       try (BatchUpdate bu = batchUpdateFactory.create(state.db,
            magicBranch.dest.getParentKey(), user, TimeUtil.nowTs())) {
         bu.setRepository(state.repo, state.rw, state.ins);
@@ -1759,7 +1779,7 @@ public class ReceiveCommits {
             .setReviewers(recipients.getReviewers())
             .setExtraCC(recipients.getCcOnly())
             .setApprovals(approvals)
-            .setMessage(msg)
+            .setMessage(msg.toString())
             .setNotify(magicBranch.notify)
             .setRequestScopePropagator(requestScopePropagator)
             .setSendMail(true)
@@ -1795,7 +1815,7 @@ public class ReceiveCommits {
     RevisionResource rsrc = new RevisionResource(changes.parse(changeCtl), ps);
     try (MergeOp op = mergeOpProvider.get()) {
       op.merge(db, rsrc.getChange(),
-          changeCtl.getUser().asIdentifiedUser(), false, null);
+          changeCtl.getUser().asIdentifiedUser(), false, new SubmitInput());
     }
     addMessage("");
     Change c = notesFactory
@@ -1890,32 +1910,6 @@ public class ReceiveCommits {
     }
   }
 
-  private String renderMessageWithApprovals(int patchSetId, String suffix,
-      Map<String, Short> n, Map<String, PatchSetApproval> c) {
-    StringBuilder msgs = new StringBuilder("Uploaded patch set " + patchSetId);
-    if (!n.isEmpty()) {
-      boolean first = true;
-      for (Map.Entry<String, Short> e : n.entrySet()) {
-        if (c.containsKey(e.getKey())
-            && c.get(e.getKey()).getValue() == e.getValue()) {
-          continue;
-        }
-        if (first) {
-          msgs.append(":");
-          first = false;
-        }
-        msgs.append(" ")
-            .append(LabelVote.create(e.getKey(), e.getValue()).format());
-      }
-    }
-
-    if (!Strings.isNullOrEmpty(suffix)) {
-      msgs.append(suffix);
-    }
-
-    return msgs.append('.').toString();
-  }
-
   private class ReplaceRequest {
     final Change.Id ontoChange;
     final ObjectId newCommitId;
@@ -2005,7 +1999,7 @@ public class ReceiveCommits {
         // very common error due to users making a new commit rather than
         // amending when trying to address review comments.
         if (rp.getRevWalk().isMergedInto(prior, newCommit)) {
-          reject(inputCommand, "squash commits first");
+          reject(inputCommand, SAME_CHANGE_ID_IN_MULTIPLE_CHANGES);
           return false;
         }
       }
@@ -2065,7 +2059,7 @@ public class ReceiveCommits {
       try {
         edit = editUtil.byChange(changeCtl);
       } catch (AuthException | IOException e) {
-        log.error("Cannt retrieve edit", e);
+        log.error("Cannot retrieve edit", e);
         return false;
       }
 

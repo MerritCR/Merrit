@@ -46,7 +46,7 @@ class PublishedBox extends CommentBox {
   interface Binder extends UiBinder<HTMLPanel, PublishedBox> {}
   private static final Binder uiBinder = GWT.create(Binder.class);
 
-  static interface Style extends CssResource {
+  interface Style extends CssResource {
     String closed();
   }
 
@@ -161,7 +161,7 @@ class PublishedBox extends CommentBox {
 
   void doReply() {
     if (!Gerrit.isSignedIn()) {
-      Gerrit.doSignIn(getCommentManager().getDiffScreen().getToken());
+      Gerrit.doSignIn(getCommentManager().host.getToken());
     } else if (replyBox == null) {
       addReplyBox(false);
     } else {
@@ -179,7 +179,7 @@ class PublishedBox extends CommentBox {
   void onQuote(ClickEvent e) {
     e.stopPropagation();
     if (!Gerrit.isSignedIn()) {
-      Gerrit.doSignIn(getCommentManager().getDiffScreen().getToken());
+      Gerrit.doSignIn(getCommentManager().host.getToken());
     }
     addReplyBox(true);
   }
@@ -188,7 +188,7 @@ class PublishedBox extends CommentBox {
   void onReplyDone(ClickEvent e) {
     e.stopPropagation();
     if (!Gerrit.isSignedIn()) {
-      Gerrit.doSignIn(getCommentManager().getDiffScreen().getToken());
+      Gerrit.doSignIn(getCommentManager().host.getToken());
     } else if (replyBox == null) {
       done.setEnabled(false);
       CommentInfo input = CommentInfo.createReply(comment);

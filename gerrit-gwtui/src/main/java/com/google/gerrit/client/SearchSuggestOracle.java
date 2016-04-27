@@ -29,7 +29,9 @@ public class SearchSuggestOracle extends HighlightSuggestOracle {
   private static final List<ParamSuggester> paramSuggester = Arrays.asList(
       new ParamSuggester(Arrays.asList("project:", "parentproject:"),
           new ProjectNameSuggestOracle()),
-      new ParamSuggester(Arrays.asList("owner:", "reviewer:"),
+      new ParamSuggester(Arrays.asList(
+          "owner:", "reviewer:", "commentby:", "reviewedby:", "author:",
+          "committer:", "from:"),
           new AccountSuggestOracle() {
             @Override
             public void onRequestSuggestions(final Request request, final Callback done) {
@@ -124,6 +126,7 @@ public class SearchSuggestOracle extends HighlightSuggestOracle {
     suggestions.add("status:closed");
     suggestions.add("status:merged");
     suggestions.add("status:abandoned");
+    suggestions.add("status:draft");
 
     suggestions.add("added:");
     suggestions.add("deleted:");
@@ -205,7 +208,7 @@ public class SearchSuggestOracle extends HighlightSuggestOracle {
   private static class SearchSuggestion implements SuggestOracle.Suggestion {
     private final String suggestion;
     private final String fullQuery;
-    public SearchSuggestion(String suggestion, String fullQuery) {
+    SearchSuggestion(String suggestion, String fullQuery) {
       this.suggestion = suggestion;
       // Add a space to the query if it is a complete operation (e.g.
       // "status:open") so the user can keep on typing.

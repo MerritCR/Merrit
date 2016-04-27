@@ -35,6 +35,3 @@
 [test]
   excluded_labels = manual
 
-[repositories]
-  jgit = lib/jgit
-

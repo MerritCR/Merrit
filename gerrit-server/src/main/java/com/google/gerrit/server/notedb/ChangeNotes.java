@@ -40,6 +40,7 @@ import com.google.common.util.concurrent.CheckedFuture;
 import com.google.common.util.concurrent.Futures;
 import com.google.common.util.concurrent.ListenableFuture;
 import com.google.common.util.concurrent.ListeningExecutorService;
+import com.google.gerrit.common.Nullable;
 import com.google.gerrit.common.data.SubmitRecord;
 import com.google.gerrit.reviewdb.client.Account;
 import com.google.gerrit.reviewdb.client.Branch;
@@ -53,6 +54,7 @@ import com.google.gerrit.reviewdb.client.RefNames;
 import com.google.gerrit.reviewdb.client.RevId;
 import com.google.gerrit.reviewdb.server.ReviewDb;
 import com.google.gerrit.reviewdb.server.ReviewDbUtil;
+import com.google.gerrit.server.git.ChainedReceiveCommands;
 import com.google.gerrit.server.project.NoSuchChangeException;
 import com.google.gerrit.server.project.ProjectCache;
 import com.google.gerrit.server.query.change.ChangeData;
@@ -161,6 +163,8 @@ public class ChangeNotes extends AbstractChangeNotes<ChangeNotes> {
     public ChangeNotes create(ReviewDb db, Project.NameKey project,
         Change.Id changeId) throws OrmException {
       Change change = unwrap(db).changes().get(changeId);
+      checkNotNull(change,
+          "change %s not found in ReviewDb", changeId);
       checkArgument(change.getProject().equals(project),
           "passed project %s when creating ChangeNotes for %s, but actual"
           + " project is %s",
@@ -189,10 +193,18 @@ public class ChangeNotes extends AbstractChangeNotes<ChangeNotes> {
     // TODO(dborowitz): Remove when deleting index schemas <27.
     public ChangeNotes createFromIdOnlyWhenNoteDbDisabled(
         ReviewDb db, Change.Id changeId) throws OrmException {
-    checkState(!args.migration.readChanges(), "do not call"
-        + " createFromIdOnlyWhenNoteDbDisabled when NoteDb is enabled");
+      checkState(!args.migration.readChanges(), "do not call"
+          + " createFromIdOnlyWhenNoteDbDisabled when NoteDb is enabled");
       Change change = unwrap(db).changes().get(changeId);
+      checkNotNull(change,
+          "change %s not found in ReviewDb", changeId);
       return new ChangeNotes(args, change.getProject(), change).load();
+    }
+
+    public ChangeNotes createWithAutoRebuildingDisabled(Change change,
+        ChainedReceiveCommands cmds) throws OrmException {
+      return new ChangeNotes(args, change.getProject(), change, false, cmds)
+          .load();
     }
 
     // TODO(ekempin): Remove when database backend is deleted
@@ -364,6 +376,9 @@ public class ChangeNotes extends AbstractChangeNotes<ChangeNotes> {
 
   private final Project.NameKey project;
   private final Change change;
+  private final boolean autoRebuild;
+  private final ChainedReceiveCommands cmds;
+
   private ImmutableSortedMap<PatchSet.Id, PatchSet> patchSets;
   private ImmutableListMultimap<PatchSet.Id, PatchSetApproval> approvals;
   private ImmutableSetMultimap<ReviewerStateInternal, Account.Id> reviewers;
@@ -382,9 +397,16 @@ public class ChangeNotes extends AbstractChangeNotes<ChangeNotes> {
 
   @VisibleForTesting
   public ChangeNotes(Args args, Project.NameKey project, Change change) {
+    this(args, project, change, true, null);
+  }
+
+  private ChangeNotes(Args args, Project.NameKey project, Change change,
+      boolean autoRebuild, @Nullable ChainedReceiveCommands cmds) {
     super(args, change != null ? change.getId() : null);
     this.project = project;
     this.change = change != null ? new Change(change) : null;
+    this.autoRebuild = autoRebuild;
+    this.cmds = cmds;
   }
 
   public Change getChange() {
@@ -479,7 +501,8 @@ public class ChangeNotes extends AbstractChangeNotes<ChangeNotes> {
       throws OrmException {
     if (draftCommentNotes == null ||
         !author.equals(draftCommentNotes.getAuthor())) {
-      draftCommentNotes = new DraftCommentNotes(args, getChangeId(), author);
+      draftCommentNotes =
+          new DraftCommentNotes(args, change, author, autoRebuild);
       draftCommentNotes.load();
     }
   }
@@ -518,16 +541,16 @@ public class ChangeNotes extends AbstractChangeNotes<ChangeNotes> {
   }
 
   @Override
-  protected void onLoad(RevWalk walk)
+  protected void onLoad(LoadHandle handle)
       throws IOException, ConfigInvalidException {
-    ObjectId rev = getRevision();
+    ObjectId rev = handle.id();
     if (rev == null) {
       loadDefaults();
       return;
     }
     try (ChangeNotesParser parser = new ChangeNotesParser(
-         project, change.getId(), rev, walk, args.repoManager, args.noteUtil,
-         args.metrics)) {
+         project, change.getId(), rev, handle.walk(), args.repoManager,
+         args.noteUtil, args.metrics)) {
       parser.parseAll();
 
       if (parser.status != null) {
@@ -584,10 +607,46 @@ public class ChangeNotes extends AbstractChangeNotes<ChangeNotes> {
     changeMessagesByPatchSet = ImmutableListMultimap.of();
     comments = ImmutableListMultimap.of();
     hashtags = ImmutableSet.of();
+    patchSets = ImmutableSortedMap.of();
+    allPastReviewers = ImmutableList.of();
   }
 
   @Override
   public Project.NameKey getProjectName() {
     return project;
+  }
+
+  @Override
+  protected ObjectId readRef(Repository repo) throws IOException {
+    return cmds != null
+        ? cmds.getObjectId(repo, getRefName())
+        : super.readRef(repo);
+  }
+
+  @Override
+  protected LoadHandle openHandle(Repository repo) throws IOException {
+    if (autoRebuild) {
+      NoteDbChangeState state = NoteDbChangeState.parse(change);
+      if (state == null || !state.isChangeUpToDate(repo)) {
+        return rebuildAndOpen(repo);
+      }
+    }
+    return super.openHandle(repo);
+  }
+
+  private LoadHandle rebuildAndOpen(Repository repo) throws IOException {
+    try {
+      NoteDbChangeState newState =
+          args.rebuilder.get().rebuild(args.db.get(), getChangeId());
+      if (newState == null) {
+        return super.openHandle(repo); // May be null in tests.
+      }
+      repo.scanForRepoChanges();
+      return LoadHandle.create(new RevWalk(repo), newState.getChangeMetaId());
+    } catch (NoSuchChangeException e) {
+      return super.openHandle(repo);
+    } catch (OrmException | ConfigInvalidException e) {
+      throw new IOException(e);
+    }
   }
 }

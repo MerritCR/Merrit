@@ -59,12 +59,21 @@
         type: Boolean,
         value: false,
       },
-      _xhrPromise: Object,  // Used for testing.
+      _loading: {
+        type: Boolean,
+        value: true,
+      },
+      _prefs: Object,
     },
 
     behaviors: [
       Gerrit.KeyboardShortcutBehavior,
-      Gerrit.RESTClientBehavior,
+    ],
+
+    observers: [
+      '_getChangeDetail(_changeNum)',
+      '_getProjectConfig(_change.project)',
+      '_getFiles(_changeNum, _patchRange.patchNum)',
     ],
 
     attached: function() {
@@ -90,21 +99,69 @@
       return this.$.restAPI.getLoggedIn();
     },
 
+    _getProjectConfig: function(project) {
+      return this.$.restAPI.getProjectConfig(project).then(
+          function(config) {
+            this._projectConfig = config;
+          }.bind(this));
+    },
+
+    _getChangeDetail: function(changeNum) {
+      return this.$.restAPI.getDiffChangeDetail(changeNum).then(
+          function(change) {
+            this._change = change;
+          }.bind(this));
+    },
+
+    _getFiles: function(changeNum, patchNum) {
+      return this.$.restAPI.getChangeFilePathsAsSpeciallySortedArray(
+          changeNum, patchNum).then(function(files) {
+            this._fileList = files;
+          }.bind(this));
+    },
+
+    _getDiffPreferences: function() {
+      return this._getLoggedIn().then(function(loggedIn) {
+        if (!loggedIn) {
+          // These defaults should match the defaults in
+          // gerrit-extension-api/src/main/jcg/gerrit/extensions/client/DiffPreferencesInfo.java
+          // NOTE: There are some settings that don't apply to PolyGerrit
+          // (Render mode being at least one of them).
+          return Promise.resolve({
+            auto_hide_diff_table_header: true,
+            context: 10,
+            cursor_blink_rate: 0,
+            ignore_whitespace: 'IGNORE_NONE',
+            intraline_difference: true,
+            line_length: 100,
+            show_line_endings: true,
+            show_tabs: true,
+            show_whitespace_errors: true,
+            syntax_highlighting: true,
+            tab_size: 8,
+            theme: 'DEFAULT',
+          });
+        }
+        return this.$.restAPI.getDiffPreferences();
+      }.bind(this));
+    },
+
     _handleReviewedChange: function(e) {
       this._setReviewed(Polymer.dom(e).rootTarget.checked);
     },
 
     _setReviewed: function(reviewed) {
       this.$.reviewed.checked = reviewed;
-      var method = reviewed ? 'PUT' : 'DELETE';
-      var url = this.changeBaseURL(this._changeNum,
-          this._patchRange.patchNum) + '/files/' +
-          encodeURIComponent(this._path) + '/reviewed';
-      this._send(method, url).catch(function(err) {
+      this._saveReviewedState(reviewed).catch(function(err) {
         alert('Couldn’t change file review status. Check the console ' +
             'and contact the PolyGerrit team for assistance.');
         throw err;
       }.bind(this));
+    },
+
+    _saveReviewedState: function(reviewed) {
+      return this.$.restAPI.saveFileReviewed(this._changeNum,
+          this._patchRange.patchNum, this._path, reviewed);
     },
 
     _handleKey: function(e) {
@@ -182,6 +239,8 @@
     _paramsChanged: function(value) {
       if (value.view != this.tagName.toLowerCase()) { return; }
 
+      this._loading = true;
+
       this._changeNum = value.changeNum;
       this._patchRange = {
         patchNum: value.patchNum,
@@ -199,7 +258,17 @@
         return;
       }
 
-      this.$.diff.reload();
+      var promises = [];
+
+      promises.push(this._getDiffPreferences().then(function(prefs) {
+        this._prefs = prefs;
+      }.bind(this)));
+
+      promises.push(this.$.diff.reload());
+
+      Promise.all(promises).then(function() {
+        this._loading = false;
+      }.bind(this));
     },
 
     _pathChanged: function(path) {
@@ -253,26 +322,12 @@
       return path == COMMIT_MESSAGE_PATH ? 'Commit message' : path;
     },
 
-    _computeChangeDetailPath: function(changeNum) {
-      return '/changes/' + changeNum + '/detail';
-    },
-
-    _computeChangeDetailQueryParams: function() {
-      return {O: this.listChangesOptionsToHex(
-          this.ListChangesOption.ALL_REVISIONS
-      )};
-    },
-
-    _computeFilesPath: function(changeNum, patchNum) {
-      return this.changeBaseURL(changeNum, patchNum) + '/files';
-    },
-
-    _computeProjectConfigPath: function(project) {
-      return '/projects/' + encodeURIComponent(project) + '/config';
-    },
-
     _computeFileSelected: function(path, currentPath) {
       return path == currentPath;
+    },
+
+    _computePrefsButtonHidden: function(prefs, loggedIn) {
+      return !loggedIn || !prefs;
     },
 
     _computeKeyNav: function(path, selectedPath, fileList) {
@@ -296,21 +351,39 @@
           this._computeDiffURL(this._changeNum, this._patchRange, path));
     },
 
-    _handleFilesResponse: function(e, req) {
-      this._fileList = Object.keys(e.detail.response).sort();
-    },
-
     _showDropdownTapHandler: function(e) {
       this.$.dropdown.open();
     },
 
-    _send: function(method, url) {
-      var xhr = document.createElement('gr-request');
-      this._xhrPromise = xhr.send({
-        method: method,
-        url: url,
-      });
-      return this._xhrPromise;
+    _handlePrefsTap: function(e) {
+      e.preventDefault();
+      this.$.prefsOverlay.open();
+    },
+
+    _handlePrefsSave: function(e) {
+      e.stopPropagation();
+      var el = Polymer.dom(e).rootTarget;
+      el.disabled = true;
+      this._saveDiffPreferences().then(function(response) {
+        el.disabled = false;
+        if (!response.ok) {
+          alert('Oops. Something went wrong. Check the console and bug the ' +
+              'PolyGerrit team for assistance.');
+          return response.text().then(function(text) {
+            console.error(text);
+          });
+        }
+        this.$.prefsOverlay.close();
+      }.bind(this));
+    },
+
+    _saveDiffPreferences: function() {
+      return this.$.restAPI.saveDiffPreferences(this._prefs);
+    },
+
+    _handlePrefsCancel: function(e) {
+      e.stopPropagation();
+      this.$.prefsOverlay.close();
     },
   });
 })();

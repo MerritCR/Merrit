@@ -55,14 +55,14 @@ public class Schema_120 extends SchemaVersion {
     try (Repository git = mgr.openRepository(subbranch.getParentKey());
         RevWalk rw = new RevWalk(git)) {
       BatchRefUpdate bru = git.getRefDatabase().newBatchUpdate();
-      try(MetaDataUpdate md = new MetaDataUpdate(GitReferenceUpdated.DISABLED,
+      try (MetaDataUpdate md = new MetaDataUpdate(GitReferenceUpdated.DISABLED,
           subbranch.getParentKey(), git, bru)) {
         md.setMessage("Added superproject subscription during upgrade");
         ProjectConfig pc = ProjectConfig.read(md);
 
         SubscribeSection s = null;
         for (SubscribeSection s1 : pc.getSubscribeSections(subbranch)) {
-          if (s.getProject() == superBranch.getParentKey()) {
+          if (s1.getProject().equals(superBranch.getParentKey())) {
             s = s1;
           }
         }
@@ -97,7 +97,7 @@ public class Schema_120 extends SchemaVersion {
             + "super_project_branch_name, "
             + "submodule_project_name, "
             + "submodule_branch_name "
-            + "FROM submodule_subscriptions");) {
+            + "FROM submodule_subscriptions")) {
       while (rs.next()) {
         Project.NameKey superproject = new Project.NameKey(rs.getString(1));
         Branch.NameKey superbranch = new Branch.NameKey(superproject,

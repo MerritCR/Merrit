@@ -15,11 +15,11 @@
 package com.google.gerrit.client.editor;
 
 import com.google.gerrit.client.Gerrit;
-import com.google.gerrit.client.VoidResult;
 import com.google.gerrit.client.account.AccountApi;
 import com.google.gerrit.client.account.EditPreferences;
 import com.google.gerrit.client.rpc.GerritCallback;
 import com.google.gerrit.client.ui.NpIntTextBox;
+import com.google.gerrit.extensions.client.EditPreferencesInfo;
 import com.google.gerrit.extensions.client.KeyMapType;
 import com.google.gerrit.extensions.client.Theme;
 import com.google.gwt.core.client.GWT;
@@ -60,6 +60,7 @@ public class EditPreferencesBox extends Composite {
   @UiField Anchor close;
   @UiField NpIntTextBox tabWidth;
   @UiField NpIntTextBox lineLength;
+  @UiField NpIntTextBox indentUnit;
   @UiField NpIntTextBox cursorBlinkRate;
   @UiField ToggleButton topMenu;
   @UiField ToggleButton syntaxHighlighting;
@@ -94,6 +95,7 @@ public class EditPreferencesBox extends Composite {
 
     tabWidth.setIntValue(prefs.tabSize());
     lineLength.setIntValue(prefs.lineLength());
+    indentUnit.setIntValue(prefs.indentUnit());
     cursorBlinkRate.setIntValue(prefs.cursorBlinkRate());
     topMenu.setValue(!prefs.hideTopMenu());
     syntaxHighlighting.setValue(prefs.syntaxHighlighting());
@@ -124,6 +126,17 @@ public class EditPreferencesBox extends Composite {
       prefs.lineLength(Math.max(1, Integer.parseInt(v)));
       if (view != null) {
         view.setLineLength(prefs.lineLength());
+      }
+    }
+  }
+
+  @UiHandler("indentUnit")
+  void onIndentUnit(ValueChangeEvent<String> e) {
+    String v = e.getValue();
+    if (v != null && v.length() > 0) {
+      prefs.indentUnit(Math.max(0, Integer.parseInt(v)));
+      if (view != null) {
+        view.setIndentUnit(prefs.indentUnit());
       }
     }
   }
@@ -235,12 +248,13 @@ public class EditPreferencesBox extends Composite {
 
   @UiHandler("save")
   void onSave(@SuppressWarnings("unused") ClickEvent e) {
-    AccountApi.putEditPreferences(prefs, new GerritCallback<VoidResult>() {
-      @Override
-      public void onSuccess(VoidResult n) {
-        prefs.copyTo(Gerrit.getEditPreferences());
-      }
-    });
+    AccountApi.putEditPreferences(prefs,
+        new GerritCallback<EditPreferences>() {
+          @Override
+          public void onSuccess(EditPreferences p) {
+            Gerrit.setEditPreferences(p.copyTo(new EditPreferencesInfo()));
+          }
+        });
     close();
   }
 
@@ -301,14 +315,8 @@ public class EditPreferencesBox extends Composite {
   }
 
   private void initKeyMapType() {
-    keyMap.addItem(
-        KeyMapType.DEFAULT.name().toLowerCase(),
-        KeyMapType.DEFAULT.name());
-    keyMap.addItem(
-        KeyMapType.EMACS.name().toLowerCase(),
-        KeyMapType.EMACS.name());
-    keyMap.addItem(
-        KeyMapType.VIM.name().toLowerCase(),
-        KeyMapType.VIM.name());
+    for (KeyMapType t : KeyMapType.values()) {
+      keyMap.addItem(t.name().toLowerCase(), t.name());
+    }
   }
 }

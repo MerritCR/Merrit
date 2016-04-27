@@ -14,6 +14,7 @@
 
 package com.google.gerrit.extensions.api.projects;
 
+import com.google.gerrit.extensions.api.access.ProjectAccessInfo;
 import com.google.gerrit.extensions.common.ProjectInfo;
 import com.google.gerrit.extensions.restapi.NotImplementedException;
 import com.google.gerrit.extensions.restapi.RestApiException;
@@ -28,10 +29,12 @@ public interface ProjectApi {
   String description() throws RestApiException;
   void description(PutDescriptionInput in) throws RestApiException;
 
+  ProjectAccessInfo access() throws RestApiException;
+
   ListRefsRequest<BranchInfo> branches();
   ListRefsRequest<TagInfo> tags();
 
-  public abstract class ListRefsRequest<T extends RefInfo> {
+  abstract class ListRefsRequest<T extends RefInfo> {
     protected int limit;
     protected int start;
     protected String substring;
@@ -108,7 +111,7 @@ public interface ProjectApi {
    * A default implementation which allows source compatibility
    * when adding new methods to the interface.
    **/
-  public class NotImplemented implements ProjectApi {
+  class NotImplemented implements ProjectApi {
     @Override
     public ProjectApi create() throws RestApiException {
       throw new NotImplementedException();
@@ -126,6 +129,11 @@ public interface ProjectApi {
 
     @Override
     public String description() throws RestApiException {
+      throw new NotImplementedException();
+    }
+
+    @Override
+    public ProjectAccessInfo access() throws RestApiException {
       throw new NotImplementedException();
     }
 

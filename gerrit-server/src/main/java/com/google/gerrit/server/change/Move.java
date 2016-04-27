@@ -26,8 +26,8 @@ import com.google.gerrit.extensions.restapi.RestApiException;
 import com.google.gerrit.extensions.restapi.RestModifyView;
 import com.google.gerrit.reviewdb.client.Branch;
 import com.google.gerrit.reviewdb.client.Change;
-import com.google.gerrit.reviewdb.client.ChangeMessage;
 import com.google.gerrit.reviewdb.client.Change.Status;
+import com.google.gerrit.reviewdb.client.ChangeMessage;
 import com.google.gerrit.reviewdb.client.PatchSet;
 import com.google.gerrit.reviewdb.client.Project;
 import com.google.gerrit.reviewdb.client.RefNames;
@@ -37,10 +37,10 @@ import com.google.gerrit.server.ChangeUtil;
 import com.google.gerrit.server.IdentifiedUser;
 import com.google.gerrit.server.PatchSetUtil;
 import com.google.gerrit.server.git.BatchUpdate;
+import com.google.gerrit.server.git.BatchUpdate.ChangeContext;
 import com.google.gerrit.server.git.GitRepositoryManager;
 import com.google.gerrit.server.git.UpdateException;
 import com.google.gerrit.server.notedb.ChangeUpdate;
-import com.google.gerrit.server.git.BatchUpdate.ChangeContext;
 import com.google.gerrit.server.project.ChangeControl;
 import com.google.gerrit.server.query.change.InternalChangeQuery;
 import com.google.gwtorm.server.OrmException;
@@ -87,8 +87,8 @@ public class Move implements RestModifyView<ChangeResource, MoveInput> {
   public ChangeInfo apply(ChangeResource req, MoveInput input)
       throws RestApiException, OrmException, UpdateException {
     ChangeControl control = req.getControl();
-    input.destination_branch = RefNames.fullName(input.destination_branch);
-    if (!control.canMoveTo(input.destination_branch, dbProvider.get())) {
+    input.destinationBranch = RefNames.fullName(input.destinationBranch);
+    if (!control.canMoveTo(input.destinationBranch, dbProvider.get())) {
       throw new AuthException("Move not permitted");
     }
 
@@ -108,7 +108,7 @@ public class Move implements RestModifyView<ChangeResource, MoveInput> {
     private Change change;
     private Branch.NameKey newDestKey;
 
-    public Op(ChangeControl ctl, MoveInput input) {
+    Op(ChangeControl ctl, MoveInput input) {
       this.input = input;
       this.caller = ctl.getUser().asIdentifiedUser();
     }
@@ -123,7 +123,7 @@ public class Move implements RestModifyView<ChangeResource, MoveInput> {
       }
 
       Project.NameKey projectKey = change.getProject();
-      newDestKey = new Branch.NameKey(projectKey, input.destination_branch);
+      newDestKey = new Branch.NameKey(projectKey, input.destinationBranch);
       Branch.NameKey changePrevDest = change.getDest();
       if (changePrevDest.equals(newDestKey)) {
         throw new ResourceConflictException(
@@ -140,17 +140,17 @@ public class Move implements RestModifyView<ChangeResource, MoveInput> {
           throw new ResourceConflictException("Merge commit cannot be moved");
         }
 
-        ObjectId refId = repo.resolve(input.destination_branch);
+        ObjectId refId = repo.resolve(input.destinationBranch);
         // Check if destination ref exists in project repo
         if (refId == null) {
           throw new ResourceConflictException(
-              "Destination " + input.destination_branch + " not found in the project");
+              "Destination " + input.destinationBranch + " not found in the project");
         }
         RevCommit refCommit = revWalk.parseCommit(refId);
         if (revWalk.isMergedInto(currPatchsetRevCommit, refCommit)) {
           throw new ResourceConflictException(
               "Current patchset revision is reachable from tip of "
-                  + input.destination_branch);
+                  + input.destinationBranch);
         }
       }
 

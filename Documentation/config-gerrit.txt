@@ -915,6 +915,12 @@ If 0 the update polling is disabled.
 +
 Default is 30 seconds.
 
+[[change.allowBlame]]change.allowBlame::
++
+Allow blame on side by side diff. If set to false, blame cannot be used.
++
+Default is true.
+
 [[change.allowDrafts]]change.allowDrafts::
 +
 Allow drafts workflow. If set to false, drafts cannot be created,
@@ -955,7 +961,7 @@ submitted.
 Default is "Submit all ${topicSize} changes of the same topic (${submitSize}
 changes including ancestors and other changes related by topic)".
 
-[[change.submitWholeTopic]]change.submitWholeTopic (*Experimental*)::
+[[change.submitWholeTopic]]change.submitWholeTopic::
 +
 Determines if the submit button submits the whole topic instead of
 just the current change.
@@ -3488,7 +3494,7 @@ By default, `false`.
 +
 Starting from version 0.9.0 Apache SSHD project added support for NIO2
 IoSession. To use the new NIO2 session the `backend` option must be set
-to `NIO2`.
+to `NIO2`. Otherwise, this option must be set to `MINA`.
 +
 By default, `NIO2`.
 

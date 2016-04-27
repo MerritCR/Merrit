@@ -52,13 +52,17 @@ public class Init extends BaseInit {
   private boolean noAutoStart;
 
   @Option(name = "--skip-plugins", usage = "Don't install plugins")
-  private boolean skipPlugins = false;
+  private boolean skipPlugins;
 
   @Option(name = "--list-plugins", usage = "List available plugins")
   private boolean listPlugins;
 
   @Option(name = "--install-plugin", usage = "Install given plugin without asking")
   private List<String> installPlugins;
+
+  @Option(name = "--install-all-plugins",
+      usage = "Install all plugins from war without asking")
+  private boolean installAllPlugins;
 
   @Option(name = "--secure-store-lib",
       usage = "Path to jar providing SecureStore implementation class")
@@ -93,8 +97,14 @@ public class Init extends BaseInit {
 
     if (!skipPlugins) {
       final List<PluginData> plugins =
-          InitPlugins.listPluginsAndRemoveTempFiles(init.site, pluginsDistribution);
+          InitPlugins.listPluginsAndRemoveTempFiles(init.site,
+              pluginsDistribution);
       ConsoleUI ui = ConsoleUI.getInstance(false);
+      if (installAllPlugins && !nullOrEmpty(installPlugins)) {
+        ui.message(
+            "Cannot use --install-plugin together with --install-all-plugins.\n");
+        return true;
+      }
       verifyInstallPluginList(ui, plugins);
       if (listPlugins) {
         if (!plugins.isEmpty()) {
@@ -131,6 +141,11 @@ public class Init extends BaseInit {
   @Override
   protected List<String> getInstallPlugins() {
     return installPlugins;
+  }
+
+  @Override
+  protected boolean installAllPlugins() {
+    return installAllPlugins;
   }
 
   @Override

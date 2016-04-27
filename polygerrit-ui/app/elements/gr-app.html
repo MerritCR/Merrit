@@ -36,19 +36,48 @@ limitations under the License.
   <template>
     <style>
       :host {
-        background-color: var(--secondary-color);
         display: flex;
         min-height: 100vh;
         flex-direction: column;
       }
       gr-main-header,
       footer {
-        background-color: var(--primary-color);
         color: var(--primary-text-color);
         padding: .5rem var(--default-horizontal-margin);
       }
+      gr-main-header {
+        background-color: var(--header-background-color, #eee);
+      }
+      footer {
+        background-color: var(--footer-background-color, #eee);
+      }
       main {
         flex: 1;
+        position: relative;
+      }
+      .errorView {
+        align-items: center;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        position: absolute;
+        top: 0;
+        right: 0;
+        bottom: 0;
+        left: 0;
+      }
+      .errorEmoji {
+        font-size: 2.6em;
+      }
+      .errorText,
+      .errorMoreInfo {
+        margin-top: .75em;
+      }
+      .errorText {
+        font-size: 1.2em;
+      }
+      .errorMoreInfo {
+        color: #999;
       }
       .feedback {
         color: #b71c1c;
@@ -56,31 +85,35 @@ limitations under the License.
     </style>
     <gr-main-header search-query="{{params.query}}"></gr-main-header>
     <main>
-      <template is="dom-if" if="{{_showChangeListView}}" restamp="true">
+      <template is="dom-if" if="[[_showChangeListView]]" restamp="true">
         <gr-change-list-view
             params="[[params]]"
             view-state="{{_viewState.changeListView}}"
             changes-per-page="[[_preferences.changes_per_page]]"
             logged-in="[[_computeLoggedIn(_account)]]"></gr-change-list-view>
       </template>
-      <template is="dom-if" if="{{_showDashboardView}}" restamp="true">
+      <template is="dom-if" if="[[_showDashboardView]]" restamp="true">
         <gr-dashboard-view
             account="[[_account]]"
             params="[[params]]"
             view-state="{{_viewState.dashboardView}}"></gr-dashboard-view>
       </template>
-      <template is="dom-if" if="{{_showChangeView}}" restamp="true">
+      <template is="dom-if" if="[[_showChangeView]]" restamp="true">
         <gr-change-view
             params="[[params]]"
             server-config="[[_serverConfig]]"
             view-state="{{_viewState.changeView}}"></gr-change-view>
       </template>
-      <template is="dom-if" if="{{_showDiffView}}" restamp="true">
+      <template is="dom-if" if="[[_showDiffView]]" restamp="true">
         <gr-diff-view
             params="[[params]]"
-            prefs="{{_diffPreferences}}"
             change-view-state="{{_viewState.changeView}}"></gr-diff-view>
       </template>
+      <div id="errorView" class="errorView" hidden>
+        <div class="errorEmoji">[[_lastError.emoji]]</div>
+        <div class="errorText">[[_lastError.text]]</div>
+        <div class="errorMoreInfo">[[_lastError.moreInfo]]</div>
+      </div>
     </main>
     <footer role="contentinfo">
       Powered by <a href="https://www.gerritcodereview.com/" target="_blank">Gerrit Code Review</a>
@@ -104,6 +137,9 @@ limitations under the License.
           view="[[params.view]]"
           on-close="_handleKeyboardShortcutDialogClose"></gr-keyboard-shortcuts-dialog>
     </gr-overlay>
+    <template is="dom-repeat" items="[[_serverConfig.plugin.js_resource_paths]]" as="path">
+      <script src$="/[[path]]" defer></script>
+    </template>
     <gr-rest-api-interface id="restAPI"></gr-rest-api-interface>
   </template>
   <script src="gr-app.js"></script>

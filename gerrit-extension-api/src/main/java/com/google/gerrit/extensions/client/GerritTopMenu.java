@@ -15,11 +15,11 @@
 package com.google.gerrit.extensions.client;
 
 public enum GerritTopMenu {
-  ALL, MY, DIFFERENCES, PROJECTS, PEOPLE, PLUGINS, DOCUMENTATION;
+  ALL, MY, PROJECTS, PEOPLE, PLUGINS, DOCUMENTATION;
 
   public final String menuName;
 
-  private GerritTopMenu() {
+  GerritTopMenu() {
     menuName = name().substring(0, 1) + name().substring(1).toLowerCase();
   }
 }

@@ -70,7 +70,7 @@ public abstract class Screen extends View {
   public void registerKeys() {
   }
 
-  private static enum Cols {
+  private enum Cols {
     West, Title, East, FarEast
   }
 
@@ -184,7 +184,6 @@ public abstract class Screen extends View {
     if (windowTitle != null) {
       Gerrit.setWindowTitle(this, windowTitle);
     }
-    Gerrit.updateMenus(this);
     Gerrit.EVENT_BUS.fireEvent(new ScreenLoadEvent(this));
     Gerrit.setQueryString(null);
     registerKeys();

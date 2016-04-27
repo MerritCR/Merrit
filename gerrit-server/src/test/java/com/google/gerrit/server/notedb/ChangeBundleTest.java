@@ -77,7 +77,7 @@ public class ChangeBundleTest {
     systemTimeZoneProperty = System.setProperty("user.timezone", tz);
     systemTimeZone = TimeZone.getDefault();
     TimeZone.setDefault(TimeZone.getTimeZone(tz));
-    long maxMs = ChangeRebuilder.MAX_WINDOW_MS;
+    long maxMs = ChangeRebuilderImpl.MAX_WINDOW_MS;
     assertThat(maxMs).isGreaterThan(1000L);
     TestTimeUtil.resetWithClockStep(maxMs * 2, MILLISECONDS);
     project = new Project.NameKey("project");
@@ -93,7 +93,7 @@ public class ChangeBundleTest {
 
   private void superWindowResolution() {
     TestTimeUtil.setClockStep(
-        ChangeRebuilder.MAX_WINDOW_MS * 2, MILLISECONDS);
+        ChangeRebuilderImpl.MAX_WINDOW_MS * 2, MILLISECONDS);
     TimeUtil.nowTs();
   }
 
@@ -135,7 +135,7 @@ public class ChangeBundleTest {
 
     c2.setTopic("topic");
     assertDiffs(b1, b2,
-        "topic differs for Change.Id "+ c1.getId() + ": {null} != {topic}");
+        "topic differs for Change.Id " + c1.getId() + ": {null} != {topic}");
   }
 
   @Test
@@ -280,14 +280,14 @@ public class ChangeBundleTest {
     assertDiffs(b1, b2,
         "Differing numbers of ChangeMessages for Change.Id " + id + ":\n"
         + "ChangeMessage{key=" + id + ",uuid1, author=100,"
-        + " writtenOn=2009-09-30 17:00:06.0, patchset=" + id + ",1,"
+        + " writtenOn=2009-09-30 17:00:06.0, patchset=" + id + ",1, tag=null,"
         + " message=[message 2]}\n"
         + "ChangeMessage{key=" + id + ",uuid2, author=100,"
-        + " writtenOn=2009-09-30 17:00:12.0, patchset=" + id + ",1,"
+        + " writtenOn=2009-09-30 17:00:12.0, patchset=" + id + ",1, tag=null,"
         + " message=[null]}\n"
         + "--- vs. ---\n"
         + "ChangeMessage{key=" + id + ",uuid1, author=100,"
-        + " writtenOn=2009-09-30 17:00:06.0, patchset=" + id + ",1,"
+        + " writtenOn=2009-09-30 17:00:06.0, patchset=" + id + ",1, tag=null,"
         + " message=[message 2]}");
   }
 
@@ -353,6 +353,45 @@ public class ChangeBundleTest {
         + " {2009-09-30 17:00:02.0} != {2009-09-30 17:00:10.0}";
     assertDiffs(b1, b3, msg);
     assertDiffs(b3, b1, msg);
+  }
+
+  @Test
+  public void diffChangeMessagesAllowsNullPatchSetIdFromReviewDb()
+      throws Exception {
+    Change c = TestChanges.newChange(project, accountId);
+    int id = c.getId().get();
+    ChangeMessage cm1 = new ChangeMessage(
+        new ChangeMessage.Key(c.getId(), "uuid"),
+        accountId, TimeUtil.nowTs(), c.currentPatchSetId());
+    cm1.setMessage("message 1");
+    ChangeMessage cm2 = clone(cm1);
+    cm2.setPatchSetId(null);
+
+    ChangeBundle b1 = new ChangeBundle(c, messages(cm1), patchSets(),
+        approvals(), comments(), REVIEW_DB);
+    ChangeBundle b2 = new ChangeBundle(c, messages(cm2), patchSets(),
+        approvals(), comments(), REVIEW_DB);
+
+    // Both are ReviewDb, exact patch set ID match is required.
+    assertDiffs(b1, b2,
+        "patchset differs for ChangeMessage.Key " + c.getId() + ",uuid:"
+            + " {" + id + ",1} != {null}");
+
+    // Null patch set ID on ReviewDb is ignored.
+    b1 = new ChangeBundle(c, messages(cm1), patchSets(), approvals(),
+        comments(), NOTE_DB);
+    b2 = new ChangeBundle(c, messages(cm2), patchSets(), approvals(),
+        comments(), REVIEW_DB);
+    assertNoDiffs(b1, b2);
+
+    // Null patch set ID on NoteDb is not ignored (but is not realistic).
+    b1 = new ChangeBundle(c, messages(cm1), patchSets(), approvals(),
+        comments(), REVIEW_DB);
+    b2 = new ChangeBundle(c, messages(cm2), patchSets(), approvals(),
+        comments(), NOTE_DB);
+    assertDiffs(b1, b2,
+        "patchset differs for ChangeMessage on " + id + " at index 0:"
+            + " {" + id + ",1} != {null}");
   }
 
   @Test

@@ -1809,6 +1809,7 @@ provided fetch info map is also included.
        "subject":"Use an EventBus to manage star icons",
        "message":"Use an EventBus to manage star icons\n\nImage widgets that need to ..."
     },
+    "base_revision":"c35558e0925e6985c91f3a16921537d5e572b7a3"
   }
 ----
 
@@ -2721,6 +2722,7 @@ link:#review-input[ReviewInput] entity.
   Content-Type: application/json; charset=UTF-8
 
   {
+    "tag": "jenkins",
     "message": "Some nits need to be fixed.",
     "labels": {
       "Code-Review": -1
@@ -3752,6 +3754,66 @@ differences are reported in the result.  Valid values are `IGNORE_NONE`,
 The `context` parameter can be specified to control the number of lines of surrounding context
 in the diff.  Valid values are `ALL` or number of lines.
 
+[[get-blame]]
+=== Get Blame
+--
+'GET /changes/link:#change-id[\{change-id\}]/revisions/link:#revision-id[\{revision-id\}]/files/link:#file-id[\{file-id\}]/blame'
+--
+
+Gets the blame of a file from a certain revision.
+
+.Request
+----
+  GET /changes/myProject~master~I8473b95934b5732ac55d26311a706c9c2bde9940/revisions/674ac754f91e64a0efb8087e59a176484bd534d1/files/gerrit-server%2Fsrc%2Fmain%2Fjava%2Fcom%2Fgoogle%2Fgerrit%2Fserver%2Fproject%2FRefControl.java/blame HTTP/1.0
+----
+
+As response a link:#blame-info[BlameInfo] entity is returned that describes the
+blame.
+
+.Response
+----
+  HTTP/1.1 200 OK
+  Content-Disposition: attachment
+  Content-Type: application/json; charset=UTF-8
+
+  )]
+  {
+    [
+      {
+        "author": "Joe Daw",
+        "id": "64e140b4de5883a4dd74d06c2b62ccd7ffd224a7",
+        "time": 1421441349,
+        "commit_msg": "RST test\n\nChange-Id: I11e9e24bd122253f4bb10c36dce825ac2410d646\n",
+        "ranges": [
+          {
+            "start": 1,
+            "end": 10
+          },
+          {
+            "start": 16,
+            "end": 296
+          }
+        ]
+      },
+      {
+        "author": "Jane Daw",
+        "id": "8d52621a0e2ac6adec73bd3a49f2371cd53137a7",
+        "time": 1421825421,
+        "commit_msg": "add banner\n\nChange-Id: I2eced9b2691015ae3c5138f4d0c4ca2b8fb15be9\n",
+        "ranges": [
+          {
+            "start": 13,
+            "end": 13
+          }
+        ]
+      }
+    ]
+  }
+----
+
+The `base` parameter can be specified to control the base patch set from which
+the blame should be generated.
+
 [[set-reviewed]]
 === Set Reviewed
 --
@@ -3970,6 +4032,27 @@ user is permitted to vote on the label. If absent, the user is not
 permitted to vote on that label.
 |`date`        |optional|
 The time and date describing when the approval was made.
+|`tag`                 |optional|
+Value of the `tag` field from link:#review-input[ReviewInput] set
+while posting the review.
+NOTE: To apply different tags on on different votes/comments multiple
+invocations of the REST call are required.
+|===========================
+
+[[blame-info]]
+=== BlameInfo
+The `BlameInfo` entity stores the commit metadata with the row coordinates where
+it applies.
+
+[options="header",cols="1,6"]
+|===========================
+|Field Name | Description
+|`author`     | The author of the commit.
+|`id`         | The id of the commit.
+|`time`       | Commit time.
+|`commit_msg` | The commit message.
+|`ranges`     |
+The blame row coordinates as link:#range-info[RangeInfo] entities.
 |===========================
 
 [[change-edit-input]]
@@ -4132,6 +4215,11 @@ Unset if written by the Gerrit system.
 |`date`            ||
 The link:rest-api.html#timestamp[timestamp] this message was posted.
 |`message`            ||The text left by the user.
+|`tag`                 |optional|
+Value of the `tag` field from link:#review-input[ReviewInput] set
+while posting the review.
+NOTE: To apply different tags on on different votes/comments multiple
+invocations of the REST call are required.
 |`_revision_number`    |optional|
 Which patchset (if any) generated this message.
 |==================================
@@ -4182,6 +4270,11 @@ written.
 The author of the message as an
 link:rest-api-accounts.html#account-info[AccountInfo] entity. +
 Unset for draft comments, assumed to be the calling user.
+|`tag`                 |optional|
+Value of the `tag` field from link:#review-input[ReviewInput] set
+while posting the review.
+NOTE: To apply different tags on on different votes/comments multiple
+invocations of the REST call are required.
 |===========================
 
 [[comment-input]]
@@ -4382,15 +4475,15 @@ The `EditInfo` entity contains information about a change edit.
 
 [options="header",cols="1,^1,5"]
 |===========================
-|Field Name    ||Description
-|`commit`      ||The commit of change edit as
+|Field Name     ||Description
+|`commit`       ||The commit of change edit as
 link:#commit-info[CommitInfo] entity.
-|`baseRevision`||The revision of the patch set change edit is based on.
-|`fetch`       ||
+|`base_revision`||The revision of the patch set the change edit is based on.
+|`fetch`        ||
 Information about how to fetch this patch set. The fetch information is
 provided as a map that maps the protocol name ("`git`", "`http`",
 "`ssh`") to link:#fetch-info[FetchInfo] entities.
-|`files`       |optional|
+|`files`        |optional|
 The files of the change edit as a map that maps the file names to
 link:#file-info[FileInfo] entities.
 |===========================
@@ -4579,9 +4672,9 @@ The `MoveInput` entity contains information for moving a change to a new branch.
 
 [options="header",cols="1,^1,5"]
 |===========================
-|Field Name   ||Description
-|`destination`||Destination branch
-|`message`    |optional|
+|Field Name          ||Description
+|`destination_branch`||Destination branch
+|`message`           |optional|
 A message to be posted in this change's comments
 |===========================
 
@@ -4619,6 +4712,17 @@ link:config-gerrit.html#receive.enableSignedPush[enabled] on the server.
 Information about the key that signed the push, along with any problems
 found while checking the signature or the key itself, as a
 link:rest-api-accounts.html#gpg-key-info[GpgKeyInfo] entity.
+|===========================
+
+[[range-info]]
+=== RangeInfo
+The `RangeInfo` entity stores the coordinates of a range.
+
+[options="header",cols="1,6"]
+|===========================
+|Field Name   | Description
+|`start`      | First index.
+|`end`        | Last index.
 |===========================
 
 [[rebase-input]]
@@ -4715,6 +4819,11 @@ revision.
 |Field Name               ||Description
 |`message`                |optional|
 The message to be added as review comment.
+|`tag`                    |optional|
+Apply this tag to the review comment message, votes, and inline
+comments. Tags may be used by CI or other automated systems to
+distinguish them from human reviews. Comments with specific tag
+values can be filtered out in the web UI.
 |`labels`                 |optional|
 The votes that should be added to the revision as a map that maps the
 label names to the voting values.
@@ -4893,6 +5002,11 @@ format link:rest-api-accounts.html#account-id[accepted by the accounts REST
 API]. Using this option requires
 link:access-control.html#category_submit_on_behalf_of[Submit (On Behalf Of)]
 permission on the branch.
+|`notify`|optional|
+Notify handling that defines to whom email notifications should be sent after
+the change is submitted. +
+Allowed values are `NONE`, `OWNER`, `OWNER_REVIEWERS` and `ALL`. +
+If not set, the default is `ALL`.
 |===========================
 
 [[submit-record]]

@@ -45,7 +45,7 @@ class SideBySideChunkManager extends ChunkManager {
   private static double guessedLineHeightPx = 15;
   private static final JavaScriptObject focusA = initOnClick(A);
   private static final JavaScriptObject focusB = initOnClick(B);
-  private static final native JavaScriptObject initOnClick(DisplaySide s) /*-{
+  private static native JavaScriptObject initOnClick(DisplaySide s) /*-{
     return $entry(function(e){
       @com.google.gerrit.client.diff.SideBySideChunkManager::focus(
         Lcom/google/gwt/dom/client/NativeEvent;
@@ -105,8 +105,6 @@ class SideBySideChunkManager extends ChunkManager {
   void render(DiffInfo diff) {
     super.render();
 
-    LineMapper mapper = getLineMapper();
-
     chunks = new ArrayList<>();
     padding = new ArrayList<>();
     paddingDivs = new ArrayList<>();
@@ -117,11 +115,11 @@ class SideBySideChunkManager extends ChunkManager {
 
     for (Region current : Natives.asList(diff.content())) {
       if (current.ab() != null) {
-        mapper.appendCommon(current.ab().length());
+        lineMapper.appendCommon(current.ab().length());
       } else if (current.skip() > 0) {
-        mapper.appendCommon(current.skip());
+        lineMapper.appendCommon(current.skip());
       } else if (current.common()) {
-        mapper.appendCommon(current.b().length());
+        lineMapper.appendCommon(current.b().length());
       } else {
         render(current, diffColor);
       }
@@ -148,10 +146,8 @@ class SideBySideChunkManager extends ChunkManager {
   }
 
   private void render(Region region, String diffColor) {
-    LineMapper mapper = getLineMapper();
-
-    int startA = mapper.getLineA();
-    int startB = mapper.getLineB();
+    int startA = lineMapper.getLineA();
+    int startB = lineMapper.getLineB();
 
     JsArrayString a = region.a();
     JsArrayString b = region.b();
@@ -169,20 +165,19 @@ class SideBySideChunkManager extends ChunkManager {
     addPadding(cmA, startA + aLen - 1, bLen - aLen);
     addPadding(cmB, startB + bLen - 1, aLen - bLen);
     addGutterTag(region, startA, startB);
-    mapper.appendReplace(aLen, bLen);
+    lineMapper.appendReplace(aLen, bLen);
 
-    int endA = mapper.getLineA() - 1;
-    int endB = mapper.getLineB() - 1;
+    int endA = lineMapper.getLineA() - 1;
+    int endB = lineMapper.getLineB() - 1;
     if (aLen > 0) {
-      addDiffChunk(cmB, endA, aLen, bLen > 0);
+      addDiffChunk(cmB, endB, endA, aLen, bLen > 0);
     }
     if (bLen > 0) {
-      addDiffChunk(cmA, endB, bLen, aLen > 0);
+      addDiffChunk(cmA, endA, endB, bLen, aLen > 0);
     }
   }
 
   private void addGutterTag(Region region, int startA, int startB) {
-    Scrollbar scrollbar = getScrollbar();
     if (region.a() == null) {
       scrollbar.insert(cmB, startB, region.b().length());
     } else if (region.b() == null) {
@@ -250,10 +245,10 @@ class SideBySideChunkManager extends ChunkManager {
     }
   }
 
-  private void addDiffChunk(CodeMirror cmToPad, int lineOnOther,
+  private void addDiffChunk(CodeMirror cmToPad, int line, int lineOnOther,
       int chunkSize, boolean edit) {
     chunks.add(new DiffChunkInfo(host.otherCm(cmToPad).side(),
-        lineOnOther - chunkSize + 1, lineOnOther, edit));
+        lineOnOther - chunkSize + 1, line - chunkSize + 1, lineOnOther, edit));
   }
 
   @Override
@@ -266,8 +261,7 @@ class SideBySideChunkManager extends ChunkManager {
             : 0;
         int res = Collections.binarySearch(
                 chunks,
-                new DiffChunkInfo(cm.side(), line, 0, false),
-                getDiffChunkComparator());
+                new DiffChunkInfo(cm.side(), line, 0, 0, false));
         diffChunkNavHelper(chunks, host, res, dir);
       }
     };

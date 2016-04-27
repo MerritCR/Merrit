@@ -41,7 +41,6 @@ import com.google.gerrit.server.notedb.ChangeNotes;
 import com.google.gerrit.server.notedb.ChangeUpdate;
 import com.google.gerrit.server.notedb.DraftCommentNotes;
 import com.google.gerrit.server.notedb.NotesMigration;
-import com.google.gerrit.server.patch.PatchList;
 import com.google.gerrit.server.patch.PatchListCache;
 import com.google.gerrit.server.patch.PatchListNotAvailableException;
 import com.google.gwtorm.server.OrmException;
@@ -272,6 +271,7 @@ public class PatchLineCommentsUtil {
     return sort(comments);
   }
 
+  @Deprecated // To be used only by HasDraftByLegacyPredicate.
   public List<PatchLineComment> draftByAuthor(ReviewDb db,
       Account.Id author) throws OrmException {
     if (!migration.readChanges()) {
@@ -283,8 +283,12 @@ public class PatchLineCommentsUtil {
     List<PatchLineComment> comments = Lists.newArrayList();
     for (String refName : refNames) {
       Change.Id changeId = Change.Id.parse(refName);
-      comments.addAll(
-          draftFactory.create(changeId, author).load().getComments().values());
+      // Avoid loading notes for all affected changes just to be able to auto-
+      // rebuild. This is only used in a corner case in the search codepath, so
+      // returning slightly stale values is ok.
+      DraftCommentNotes notes =
+          draftFactory.createWithAutoRebuildingDisabled(changeId, author);
+      comments.addAll(notes.load().getComments().values());
     }
     return sort(comments);
   }
@@ -307,7 +311,7 @@ public class PatchLineCommentsUtil {
 
   public void deleteAllDraftsFromAllUsers(Change.Id changeId)
       throws IOException {
-    try (Repository repo = repoManager.openMetadataRepository(allUsers);
+    try (Repository repo = repoManager.openRepository(allUsers);
         RevWalk rw = new RevWalk(repo)) {
       BatchRefUpdate bru = repo.getRefDatabase().newBatchUpdate();
       for (Ref ref : getDraftRefs(repo, changeId).values()) {
@@ -358,14 +362,9 @@ public class PatchLineCommentsUtil {
         "cannot set RevId for patch set %s on comment %s", ps.getId(), c);
     if (c.getRevId() == null) {
       try {
-        if (Side.fromShort(c.getSide()) == Side.REVISION) {
-          c.setRevId(ps.getRevision());
-        } else {
-          PatchList patchList = cache.get(change, ps);
-          c.setRevId((c.getSide() == (short) 0)
-            ? new RevId(ObjectId.toString(patchList.getOldId()))
-            : new RevId(ObjectId.toString(patchList.getNewId())));
-        }
+        c.setRevId(Side.fromShort(c.getSide()) == Side.PARENT
+            ? new RevId(ObjectId.toString(cache.getOldId(change, ps)))
+            : ps.getRevision());
       } catch (PatchListNotAvailableException e) {
         throw new OrmException(e);
       }
@@ -374,7 +373,7 @@ public class PatchLineCommentsUtil {
   }
 
   private Set<String> getRefNamesAllUsers(String prefix) throws OrmException {
-    try (Repository repo = repoManager.openMetadataRepository(allUsers)) {
+    try (Repository repo = repoManager.openRepository(allUsers)) {
       RefDatabase refDb = repo.getRefDatabase();
       return refDb.getRefs(prefix).keySet();
     } catch (IOException e) {
@@ -382,9 +381,9 @@ public class PatchLineCommentsUtil {
     }
   }
 
-  private Map<String, Ref> getDraftRefs(Change.Id changeId)
+  public Map<String, Ref> getDraftRefs(Change.Id changeId)
       throws OrmException {
-    try (Repository repo = repoManager.openMetadataRepository(allUsers)) {
+    try (Repository repo = repoManager.openRepository(allUsers)) {
       return getDraftRefs(repo, changeId);
     } catch (IOException e) {
       throw new OrmException(e);

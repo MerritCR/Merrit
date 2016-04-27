@@ -281,7 +281,7 @@ public final class Change {
    * codes ('A'..'Z') indicate a change that is closed and cannot be further
    * modified.
    * */
-  public static enum Status {
+  public enum Status {
     /**
      * Change is open and pending review, or review is in progress.
      *
@@ -356,7 +356,7 @@ public final class Change {
     private final boolean closed;
     private final ChangeStatus changeStatus;
 
-    private Status(char c, ChangeStatus cs) {
+    Status(char c, ChangeStatus cs) {
       code = c;
       closed = !(MIN_OPEN <= c && c <= MAX_OPEN);
       changeStatus = cs;
@@ -470,6 +470,10 @@ public final class Change {
   @Column(id = 18, notNull = false)
   protected String submissionId;
 
+  /** @see com.google.gerrit.server.notedb.NoteDbChangeState */
+  @Column(id = 101, notNull = false, length = Integer.MAX_VALUE)
+  protected String noteDbState;
+
   protected Change() {
   }
 
@@ -498,6 +502,7 @@ public final class Change {
     originalSubject = other.originalSubject;
     submissionId = other.submissionId;
     topic = other.topic;
+    noteDbState = other.noteDbState;
   }
 
   /** Legacy 32 bit integer identity for a change. */
@@ -631,6 +636,14 @@ public final class Change {
 
   public void setTopic(String topic) {
     this.topic = topic;
+  }
+
+  public String getNoteDbState() {
+    return noteDbState;
+  }
+
+  public void setNoteDbState(String state) {
+    noteDbState = state;
   }
 
   @Override

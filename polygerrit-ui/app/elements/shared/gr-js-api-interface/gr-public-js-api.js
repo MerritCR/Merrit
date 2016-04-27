@@ -14,14 +14,37 @@
 (function(window) {
   'use strict';
 
-  function Plugin() {}
+  function Plugin(opt_url) {
+    this._url = new URL(opt_url);
+    if (this._url.pathname.indexOf('/plugins') !== 0) {
+      console.warn('Plugin not being loaded from /plugins base path:',
+          this._url.href, '— Unable to determine name.');
+      return;
+    }
+    this._name = this._url.pathname.split('/')[2];
+  }
+
+  Plugin.prototype._name = '';
+
+  Plugin.prototype.getPluginName = function() {
+    return this._name;
+  };
 
   Plugin.prototype.on = function(eventName, callback) {
     document.createElement('gr-js-api-interface').addEventCallback(eventName,
         callback);
   };
 
+  Plugin.prototype.url = function(opt_path) {
+    return this._url.origin + '/plugins/' + this._name + (opt_path || '/');
+  };
+
   var Gerrit = window.Gerrit || {};
+
+  Gerrit.getPluginName = function() {
+    console.warn('Gerrit.getPluginName is not supported in PolyGerrit.',
+        'Please use self.getPluginName() instead.');
+  };
 
   Gerrit.css = function(rulesStr) {
     if (!Gerrit._customStyleSheet) {
@@ -33,10 +56,12 @@
     var name = '__pg_js_api_class_' + Gerrit._customStyleSheet.cssRules.length;
     Gerrit._customStyleSheet.insertRule('.' + name + '{' + rulesStr + '}', 0);
     return name;
-  },
+  };
 
-  Gerrit.install = function(callback) {
-    callback(new Plugin());
+  Gerrit.install = function(callback, opt_src) {
+    // TODO(andybons): Polyfill currentScript for IE10/11 (edge supports it).
+    var src = opt_src || (document.currentScript && document.currentScript.src);
+    callback(new Plugin(src));
   };
 
   window.Gerrit = Gerrit;

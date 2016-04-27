@@ -60,14 +60,14 @@ public final class PatchLineComment {
   public static final char STATUS_DRAFT = 'd';
   public static final char STATUS_PUBLISHED = 'P';
 
-  public static enum Status {
+  public enum Status {
     DRAFT(STATUS_DRAFT),
 
     PUBLISHED(STATUS_PUBLISHED);
 
     private final char code;
 
-    private Status(final char c) {
+    Status(final char c) {
       code = c;
     }
 
@@ -122,6 +122,9 @@ public final class PatchLineComment {
   @Column(id = 9, notNull = false)
   protected CommentRange range;
 
+  @Column(id = 10, notNull = false)
+  protected String tag;
+
   /**
    * The RevId for the commit to which this comment is referring.
    *
@@ -142,6 +145,25 @@ public final class PatchLineComment {
     setParentUuid(parentUuid);
     setStatus(Status.DRAFT);
     setWrittenOn(when);
+  }
+
+  public PatchLineComment(PatchLineComment o) {
+    key = o.key;
+    lineNbr = o.lineNbr;
+    author = o.author;
+    writtenOn = o.writtenOn;
+    status = o.status;
+    side = o.side;
+    message = o.message;
+    parentUuid = o.parentUuid;
+    revId = o.revId;
+    if (o.range != null) {
+      range = new CommentRange(
+          o.range.getStartLine(),
+          o.range.getStartCharacter(),
+          o.range.getEndLine(),
+          o.range.getEndCharacter());
+    }
   }
 
   public PatchLineComment.Key getKey() {
@@ -230,6 +252,14 @@ public final class PatchLineComment {
     return revId;
   }
 
+  public void setTag(String tag) {
+    this.tag = tag;
+  }
+
+  public String getTag() {
+    return tag;
+  }
+
   @Override
   public boolean equals(Object o) {
     if (o instanceof PatchLineComment) {
@@ -243,7 +273,8 @@ public final class PatchLineComment {
           && Objects.equals(message, c.getMessage())
           && Objects.equals(parentUuid, c.getParentUuid())
           && Objects.equals(range, c.getRange())
-          && Objects.equals(revId, c.getRevId());
+          && Objects.equals(revId, c.getRevId())
+          && Objects.equals(tag, c.getTag());
     }
     return false;
   }
@@ -270,6 +301,7 @@ public final class PatchLineComment {
     builder.append("range=").append(Objects.toString(range, ""))
       .append(',');
     builder.append("revId=").append(revId != null ? revId.get() : "");
+    builder.append("tag=").append(Objects.toString(tag, ""));
     builder.append('}');
     return builder.toString();
   }

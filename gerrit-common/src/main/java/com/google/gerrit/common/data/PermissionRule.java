@@ -17,7 +17,7 @@ package com.google.gerrit.common.data;
 public class PermissionRule implements Comparable<PermissionRule> {
   public static final String FORCE_PUSH = "Force Push";
   public static final String FORCE_EDIT = "Force Edit";
-  public static enum Action {
+  public enum Action {
     ALLOW, DENY, BLOCK,
 
     INTERACTIVE, BATCH
@@ -262,6 +262,11 @@ public class PermissionRule implements Comparable<PermissionRule> {
     }
 
     return rule;
+  }
+
+  public boolean hasRange() {
+    return (!(getMin() == null || getMin() == 0))
+      || (!(getMax() == null || getMax() == 0));
   }
 
   public static int parseInt(String value) {

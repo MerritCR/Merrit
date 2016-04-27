@@ -62,7 +62,7 @@ public class Hashtags extends Composite {
     init(REMOVE);
   }
 
-  private static final native void init(String r) /*-{
+  private static native void init(String r) /*-{
     $wnd[r] = $entry(function(e) {
       @com.google.gerrit.client.change.Hashtags::onRemove(Lcom/google/gwt/dom/client/NativeEvent;)(e)
     });
@@ -114,9 +114,9 @@ public class Hashtags extends Composite {
     hashtagTextBox.addKeyDownHandler(new KeyDownHandler() {
       @Override
       public void onKeyDown(KeyDownEvent e) {
-        if (e.getNativeEvent().getKeyCode() == KeyCodes.KEY_ESCAPE) {
+        if (e.getNativeKeyCode() == KeyCodes.KEY_ESCAPE) {
           onCancel(null);
-        } else if (e.getNativeEvent().getKeyCode() == KeyCodes.KEY_ENTER) {
+        } else if (e.getNativeKeyCode() == KeyCodes.KEY_ENTER) {
           onAdd(null);
         }
       }
@@ -132,7 +132,7 @@ public class Hashtags extends Composite {
         ClickEvent.getType());
   }
 
-  void init(ChangeScreen.Style style){
+  void init(ChangeScreen.Style style) {
     this.style = style;
   }
 
@@ -246,12 +246,12 @@ public class Hashtags extends Composite {
       input.init(toJsArrayString(add), toJsArrayString(remove));
       return input;
     }
-    private static JsArrayString toJsArrayString(String commaSeparated){
+    private static JsArrayString toJsArrayString(String commaSeparated) {
       if (commaSeparated == null || commaSeparated.equals("")) {
         return null;
       }
       JsArrayString array = JsArrayString.createArray().cast();
-      for (String hashtag : commaSeparated.split(",")){
+      for (String hashtag : commaSeparated.split(",")) {
         array.push(hashtag.trim());
       }
       return array;

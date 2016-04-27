@@ -99,7 +99,7 @@ abstract class DiffScreen extends Screen {
   final PatchSet.Id revision;
   final String path;
   final DiffPreferences prefs;
-  final DiffView diffScreenType;
+  final SkipManager skipManager;
 
   private DisplaySide startSide;
   private int startLine;
@@ -133,12 +133,13 @@ abstract class DiffScreen extends Screen {
     this.path = path;
     this.startSide = startSide;
     this.startLine = startLine;
-    this.diffScreenType = diffScreenType;
 
     prefs = DiffPreferences.create(Gerrit.getDiffPreferences());
     handlers = new ArrayList<>(6);
     keysNavigation = new KeyCommandSet(Gerrit.C.sectionNavigation());
-    header = new Header(keysNavigation, base, revision, path, diffScreenType);
+    header = new Header(
+        keysNavigation, base, revision, path, diffScreenType, prefs);
+    skipManager = new SkipManager(this);
   }
 
   @Override
@@ -208,8 +209,9 @@ abstract class DiffScreen extends Screen {
           }));
     }
 
-    final CommentsCollections comments = new CommentsCollections();
-    comments.load(base, revision, path, group2);
+    final CommentsCollections comments =
+        new CommentsCollections(base, revision, path);
+    comments.load(group2);
 
     RestApi call = ChangeApi.detail(changeId.get());
     ChangeList.addOptions(call, EnumSet.of(
@@ -477,8 +479,8 @@ abstract class DiffScreen extends Screen {
         new NoOpKeyCommand(0, 'j', PatchUtil.C.lineNext()),
         new NoOpKeyCommand(0, 'k', PatchUtil.C.linePrev()));
     keysNavigation.add(
-        new NoOpKeyCommand(0, 'n', PatchUtil.C.chunkNext2()),
-        new NoOpKeyCommand(0, 'p', PatchUtil.C.chunkPrev2()));
+        new NoOpKeyCommand(0, 'n', PatchUtil.C.chunkNext()),
+        new NoOpKeyCommand(0, 'p', PatchUtil.C.chunkPrev()));
     keysNavigation.add(
         new NoOpKeyCommand(KeyCommand.M_SHIFT, 'n', PatchUtil.C.commentNext()),
         new NoOpKeyCommand(KeyCommand.M_SHIFT, 'p', PatchUtil.C.commentPrev()));
@@ -574,7 +576,15 @@ abstract class DiffScreen extends Screen {
     getChunkManager().render(diff);
   }
 
-  abstract void setShowLineNumbers(boolean b);
+  void setShowLineNumbers(boolean b) {
+    if (b) {
+      getDiffTable().addStyleName(
+          Resources.I.diffTableStyle().showLineNumbers());
+    } else {
+      getDiffTable().removeStyleName(
+          Resources.I.diffTableStyle().showLineNumbers());
+    }
+  }
 
   void setShowIntraline(boolean b) {
     if (b && getIntraLineStatus() == DiffInfo.IntraLineStatus.OFF) {
@@ -598,8 +608,8 @@ abstract class DiffScreen extends Screen {
     operation(new Runnable() {
       @Override
       public void run() {
-        getSkipManager().removeAll();
-        getSkipManager().render(context, diff);
+        skipManager.removeAll();
+        skipManager.render(context, diff);
         updateRenderEntireFile();
       }
     });
@@ -689,8 +699,6 @@ abstract class DiffScreen extends Screen {
   abstract ChunkManager getChunkManager();
 
   abstract CommentManager getCommentManager();
-
-  abstract SkipManager getSkipManager();
 
   Change.Status getChangeStatus() {
     return changeStatus;
@@ -873,12 +881,12 @@ abstract class DiffScreen extends Screen {
             operation(new Runnable() {
               @Override
               public void run() {
-                getSkipManager().removeAll();
+                skipManager.removeAll();
                 getChunkManager().reset();
                 getDiffTable().scrollbar.removeDiffAnnotations();
                 setShowIntraline(prefs.intralineDifference());
                 render(diff);
-                getSkipManager().render(prefs.context(), diff);
+                skipManager.render(prefs.context(), diff);
               }
             });
           }
@@ -905,9 +913,11 @@ abstract class DiffScreen extends Screen {
   private GutterClickHandler onGutterClick(final CodeMirror cm) {
     return new GutterClickHandler() {
       @Override
-      public void handle(CodeMirror instance, final int line, final String gutterClass,
-          NativeEvent clickEvent) {
-        if (clickEvent.getButton() == NativeEvent.BUTTON_LEFT
+      public void handle(CodeMirror instance, final int line,
+          final String gutterClass, NativeEvent clickEvent) {
+        if (Element.as(clickEvent.getEventTarget())
+                .hasClassName(getLineNumberClassName())
+            && clickEvent.getButton() == NativeEvent.BUTTON_LEFT
             && !clickEvent.getMetaKey()
             && !clickEvent.getAltKey()
             && !clickEvent.getCtrlKey()
@@ -916,7 +926,8 @@ abstract class DiffScreen extends Screen {
           Scheduler.get().scheduleDeferred(new ScheduledCommand() {
             @Override
             public void execute() {
-              getCommentManager().newDraftOnGutterClick(cm, gutterClass, line + 1);
+              getCommentManager().newDraftOnGutterClick(
+                  cm, gutterClass, line + 1);
             }
           });
         }
@@ -932,10 +943,16 @@ abstract class DiffScreen extends Screen {
 
   abstract DiffTable getDiffTable();
 
+  abstract int getCmLine(int line, DisplaySide side);
+
+  abstract String getLineNumberClassName();
+
   LineOnOtherInfo lineOnOther(DisplaySide side, int line) {
-    return getChunkManager().getLineMapper().lineOnOther(side, line);
+    return getChunkManager().lineMapper.lineOnOther(side, line);
   }
 
   abstract ScreenLoadCallback<ConfigInfoCache.Entry> getScreenLoadCallback(
       CommentsCollections comments);
+
+  abstract boolean isSideBySide();
 }
