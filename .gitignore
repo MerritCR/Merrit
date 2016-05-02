@@ -24,6 +24,7 @@
 *.swp
 *.asc
 /bin/
+*~
 *.iml
 *.settings
 *.project
