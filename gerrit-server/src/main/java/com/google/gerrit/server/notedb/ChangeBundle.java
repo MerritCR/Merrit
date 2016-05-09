@@ -14,6 +14,7 @@
 
 package com.google.gerrit.server.notedb;
 
+import static com.google.common.base.MoreObjects.firstNonNull;
 import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.base.Preconditions.checkNotNull;
 import static com.google.common.base.Preconditions.checkState;
@@ -22,15 +23,21 @@ import static com.google.gerrit.reviewdb.server.ReviewDbUtil.intKeyOrdering;
 import static com.google.gerrit.server.notedb.ChangeBundle.Source.NOTE_DB;
 import static com.google.gerrit.server.notedb.ChangeBundle.Source.REVIEW_DB;
 
-import com.google.common.base.Joiner;
+import com.google.auto.value.AutoValue;
+import com.google.common.base.CharMatcher;
 import com.google.common.collect.ComparisonChain;
 import com.google.common.collect.ImmutableCollection;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
+import com.google.common.collect.ImmutableSortedMap;
 import com.google.common.collect.Iterables;
+import com.google.common.collect.LinkedListMultimap;
 import com.google.common.collect.Lists;
+import com.google.common.collect.Multimap;
 import com.google.common.collect.Ordering;
 import com.google.common.collect.Sets;
+import com.google.gerrit.common.Nullable;
+import com.google.gerrit.reviewdb.client.Account;
 import com.google.gerrit.reviewdb.client.Change;
 import com.google.gerrit.reviewdb.client.ChangeMessage;
 import com.google.gerrit.reviewdb.client.Patch;
@@ -47,6 +54,8 @@ import java.sql.Timestamp;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
+import java.util.Iterator;
+import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -113,35 +122,38 @@ public class ChangeBundle {
     return out;
   }
 
+  // Unlike the *Map comparators, which are intended to make key lists diffable,
+  // this comparator sorts first on timestamp, then on every other field.
+  private static final Ordering<ChangeMessage> CHANGE_MESSAGE_ORDER =
+      new Ordering<ChangeMessage>() {
+        final Ordering<Comparable<?>> nullsFirst =
+            Ordering.natural().nullsFirst();
+
+        @Override
+        public int compare(ChangeMessage a, ChangeMessage b) {
+          return ComparisonChain.start()
+              .compare(a.getWrittenOn(), b.getWrittenOn())
+              .compare(a.getKey().getParentKey().get(),
+                  b.getKey().getParentKey().get())
+              .compare(psId(a), psId(b), nullsFirst)
+              .compare(a.getAuthor(), b.getAuthor(), intKeyOrdering())
+              .compare(a.getMessage(), b.getMessage(), nullsFirst)
+              .result();
+        }
+
+        private Integer psId(ChangeMessage m) {
+          return m.getPatchSetId() != null ? m.getPatchSetId().get() : null;
+        }
+      };
+
   private static ImmutableList<ChangeMessage> changeMessageList(
       Iterable<ChangeMessage> in) {
-    // Unlike the *Map comparators, which are intended to make key lists
-    // diffable, this comparator sorts first on timestamp, then on every other
-    // field.
-    final Ordering<Comparable<?>> nullsFirst = Ordering.natural().nullsFirst();
-    return new Ordering<ChangeMessage>() {
-      @Override
-      public int compare(ChangeMessage a, ChangeMessage b) {
-        return ComparisonChain.start()
-            .compare(roundToSecond(a.getWrittenOn()),
-                roundToSecond(b.getWrittenOn()))
-            .compare(a.getKey().getParentKey().get(),
-                b.getKey().getParentKey().get())
-            .compare(psId(a), psId(b), nullsFirst)
-            .compare(a.getAuthor(), b.getAuthor(), intKeyOrdering())
-            .compare(a.getMessage(), b.getMessage(), nullsFirst)
-            .result();
-      }
-
-      private Integer psId(ChangeMessage m) {
-        return m.getPatchSetId() != null ? m.getPatchSetId().get() : null;
-      }
-    }.immutableSortedCopy(in);
+    return CHANGE_MESSAGE_ORDER.immutableSortedCopy(in);
   }
 
 
-  private static Map<PatchSet.Id, PatchSet> patchSetMap(Iterable<PatchSet> in) {
-    Map<PatchSet.Id, PatchSet> out = new TreeMap<>(
+  private static TreeMap<PatchSet.Id, PatchSet> patchSetMap(Iterable<PatchSet> in) {
+    TreeMap<PatchSet.Id, PatchSet> out = new TreeMap<>(
         new Comparator<PatchSet.Id>() {
           @Override
           public int compare(PatchSet.Id a, PatchSet.Id b) {
@@ -234,7 +246,7 @@ public class ChangeBundle {
 
   private final Change change;
   private final ImmutableList<ChangeMessage> changeMessages;
-  private final ImmutableMap<PatchSet.Id, PatchSet> patchSets;
+  private final ImmutableSortedMap<PatchSet.Id, PatchSet> patchSets;
   private final ImmutableMap<PatchSetApproval.Key, PatchSetApproval>
       patchSetApprovals;
   private final ImmutableMap<PatchLineComment.Key, PatchLineComment>
@@ -250,7 +262,7 @@ public class ChangeBundle {
       Source source) {
     this.change = checkNotNull(change);
     this.changeMessages = changeMessageList(changeMessages);
-    this.patchSets = ImmutableMap.copyOf(patchSetMap(patchSets));
+    this.patchSets = ImmutableSortedMap.copyOfSorted(patchSetMap(patchSets));
     this.patchSetApprovals =
         ImmutableMap.copyOf(patchSetApprovalMap(patchSetApprovals));
     this.patchLineComments =
@@ -306,13 +318,142 @@ public class ChangeBundle {
     return ImmutableList.copyOf(diffs);
   }
 
+  private Timestamp getFirstPatchSetTime() {
+    if (patchSets.isEmpty()) {
+      return change.getCreatedOn();
+    }
+    return patchSets.firstEntry().getValue().getCreatedOn();
+  }
+
+  private Timestamp getLatestTimestamp() {
+    Ordering<Timestamp> o = Ordering.natural().nullsFirst();
+    Timestamp ts = null;
+    for (ChangeMessage cm : getChangeMessages()) {
+      ts = o.max(ts, cm.getWrittenOn());
+    }
+    for (PatchSet ps : getPatchSets()) {
+      ts = o.max(ts, ps.getCreatedOn());
+    }
+    for (PatchSetApproval psa : getPatchSetApprovals()) {
+      ts = o.max(ts, psa.getGranted());
+    }
+    for (PatchLineComment plc : getPatchLineComments()) {
+      // Ignore draft comments, as they do not show up in the change meta graph.
+      if (plc.getStatus() != PatchLineComment.Status.DRAFT) {
+        ts = o.max(ts, plc.getWrittenOn());
+      }
+    }
+    return firstNonNull(ts, change.getLastUpdatedOn());
+  }
+
   private static void diffChanges(List<String> diffs, ChangeBundle bundleA,
       ChangeBundle bundleB) {
     Change a = bundleA.change;
     Change b = bundleB.change;
     String desc = a.getId().equals(b.getId()) ? describe(a.getId()) : "Changes";
+
+    boolean excludeCreatedOn = false;
+    boolean excludeSubject = false;
+    boolean excludeOrigSubj = false;
+    boolean excludeTopic = false;
+    Timestamp aUpdated = a.getLastUpdatedOn();
+    Timestamp bUpdated = b.getLastUpdatedOn();
+
+    // Allow created timestamp in NoteDb to be either the created timestamp of
+    // the change, or the timestamp of the first remaining patch set.
+    //
+    // Ignore subject if the NoteDb subject starts with the ReviewDb subject.
+    // The NoteDb subject is read directly from the commit, whereas the ReviewDb
+    // subject historically may have been truncated to fit in a SQL varchar
+    // column.
+    //
+    // Ignore original subject on the ReviewDb side when comparing to NoteDb.
+    // This field may have any number of values:
+    //  - It may be null, if the change has had no new patch sets pushed since
+    //    migrating to schema 103.
+    //  - It may match the first patch set subject, if the change was created
+    //    after migrating to schema 103.
+    //  - It may match the subject of the first patch set that was pushed after
+    //    the migration to schema 103, even though that is neither the subject
+    //    of the first patch set nor the subject of the last patch set. (See
+    //    Change#setCurrentPatchSet as of 43b10f86 for this behavior.) This
+    //    subject of an intermediate patch set is not available to the
+    //    ChangeBundle; we would have to get the subject from the repo, which is
+    //    inconvenient at this point.
+    //
+    // Ignore original subject on the ReviewDb side if it equals the subject of
+    // the current patch set.
+    //
+    // Ignore empty topic on the ReviewDb side if it is null on the NoteDb side.
+    //
+    // Use max timestamp of all ReviewDb entities when comparing with NoteDb.
+    if (bundleA.source == REVIEW_DB && bundleB.source == NOTE_DB) {
+      excludeCreatedOn = !timestampsDiffer(
+          bundleA, bundleA.getFirstPatchSetTime(), bundleB, b.getCreatedOn());
+      excludeSubject = b.getSubject().startsWith(a.getSubject());
+      excludeOrigSubj = true;
+      excludeTopic = "".equals(a.getTopic()) && b.getTopic() == null;
+      aUpdated = bundleA.getLatestTimestamp();
+    } else if (bundleA.source == NOTE_DB && bundleB.source == REVIEW_DB) {
+      excludeCreatedOn = !timestampsDiffer(
+          bundleA, a.getCreatedOn(), bundleB, bundleB.getFirstPatchSetTime());
+      excludeSubject = a.getSubject().startsWith(b.getSubject());
+      excludeOrigSubj = true;
+      excludeTopic = a.getTopic() == null && "".equals(b.getTopic());
+      bUpdated = bundleB.getLatestTimestamp();
+    }
+
+    String updatedField = "lastUpdatedOn";
+    List<String> exclude =
+        Lists.newArrayList(updatedField, "noteDbState", "rowVersion");
+    if (excludeCreatedOn) {
+      exclude.add("createdOn");
+    }
+    if (excludeSubject) {
+      exclude.add("subject");
+    }
+    if (excludeOrigSubj) {
+      exclude.add("originalSubject");
+    }
+    if (excludeTopic) {
+      exclude.add("topic");
+    }
     diffColumnsExcluding(diffs, Change.class, desc, bundleA, a, bundleB, b,
-        "rowVersion", "noteDbState");
+        exclude);
+
+    // Allow last updated timestamps to either be exactly equal (within slop),
+    // or the NoteDb timestamp to be equal to the latest entity timestamp in the
+    // whole ReviewDb bundle (within slop).
+    if (timestampsDiffer(bundleA, a.getLastUpdatedOn(),
+          bundleB, b.getLastUpdatedOn())) {
+      diffTimestamps(diffs, desc, bundleA, aUpdated, bundleB, bUpdated,
+          "effective last updated time");
+    }
+  }
+
+  /**
+   * Set of fields that must always exactly match between ReviewDb and NoteDb.
+   * <p>
+   * Used to limit the worst-case quadratic search when pairing off matching
+   * messages below.
+   */
+  @AutoValue
+  static abstract class ChangeMessageCandidate {
+    static ChangeMessageCandidate create(ChangeMessage cm) {
+      return new AutoValue_ChangeBundle_ChangeMessageCandidate(
+          cm.getAuthor(),
+          cm.getMessage(),
+          cm.getTag());
+    }
+
+    @Nullable abstract Account.Id author();
+    @Nullable abstract String message();
+    @Nullable abstract String tag();
+
+    // Exclude:
+    //  - patch set, which may be null on ReviewDb side but not NoteDb
+    //  - UUID, which is always different between ReviewDb and NoteDb
+    //  - writtenOn, which is fuzzy
   }
 
   private static void diffChangeMessages(List<String> diffs,
@@ -332,43 +473,79 @@ public class ChangeBundle {
       }
       return;
     }
-
-    // At least one is from NoteDb, so comparisons are inexact as noted below.
     Change.Id id = bundleA.getChange().getId();
     checkArgument(id.equals(bundleB.getChange().getId()));
-    List<ChangeMessage> as = bundleA.changeMessages;
-    List<ChangeMessage> bs = bundleB.changeMessages;
-    if (as.size() != bs.size()) {
-      Joiner j = Joiner.on("\n");
-      diffs.add("Differing numbers of ChangeMessages for Change.Id " + id
-          + ":\n" + j.join(as) + "\n--- vs. ---\n" + j.join(bs));
+
+    // Try to pair up matching ChangeMessages from each side, and succeed only
+    // if both collections are empty at the end. Quadratic in the worst case,
+    // but easy to reason about.
+    List<ChangeMessage> as = new LinkedList<>(bundleA.getChangeMessages());
+
+    Multimap<ChangeMessageCandidate, ChangeMessage> bs =
+        LinkedListMultimap.create();
+    for (ChangeMessage b : bundleB.getChangeMessages()) {
+      bs.put(ChangeMessageCandidate.create(b), b);
+    }
+
+    Iterator<ChangeMessage> ait = as.iterator();
+    A: while (ait.hasNext()) {
+      ChangeMessage a = ait.next();
+      Iterator<ChangeMessage> bit =
+          bs.get(ChangeMessageCandidate.create(a)).iterator();
+      while (bit.hasNext()) {
+        ChangeMessage b = bit.next();
+        if (changeMessagesMatch(bundleA, a, bundleB, b)) {
+          ait.remove();
+          bit.remove();
+          continue A;
+        }
+      }
+    }
+
+    if (as.isEmpty() && bs.isEmpty()) {
       return;
     }
-
-    for (int i = 0; i < as.size(); i++) {
-      ChangeMessage a = as.get(i);
-      ChangeMessage b = bs.get(i);
-      String desc = "ChangeMessage on " + id + " at index " + i;
-
-      // Ignore null PatchSet.Id on a ReviewDb change; all entities in NoteDb
-      // have a PatchSet.Id.
-      boolean checkPsId = true;
-      if (bundleA.source == REVIEW_DB) {
-        checkPsId = a.getPatchSetId() != null;
-      } else if (bundleB.source == REVIEW_DB) {
-        checkPsId = b.getPatchSetId() != null;
+    StringBuilder sb = new StringBuilder("ChangeMessages differ for Change.Id ")
+        .append(id).append('\n');
+    if (!as.isEmpty()) {
+      sb.append("Only in A:");
+      for (ChangeMessage cm : as) {
+        sb.append("\n  ").append(cm);
       }
-
-      // Ignore UUIDs for both sides.
-      List<String> exclude = Lists.newArrayList("key");
-      if (!checkPsId) {
-        exclude.add("patchset");
+      if (!bs.isEmpty()) {
+        sb.append('\n');
       }
-
-      // Normal column-wise diff also allows timestamp slop.
-      diffColumnsExcluding(diffs, ChangeMessage.class, desc, bundleA, a,
-          bundleB, b, exclude);
     }
+    if (!bs.isEmpty()) {
+      sb.append("Only in B:");
+      for (ChangeMessage cm : CHANGE_MESSAGE_ORDER.sortedCopy(bs.values())) {
+        sb.append("\n  ").append(cm);
+      }
+    }
+    diffs.add(sb.toString());
+  }
+
+  private static boolean changeMessagesMatch(
+      ChangeBundle bundleA, ChangeMessage a,
+      ChangeBundle bundleB, ChangeMessage b) {
+    List<String> tempDiffs = new ArrayList<>();
+    String temp = "temp";
+
+    boolean excludePatchSet = false;
+    if (bundleA.source == REVIEW_DB && bundleB.source == NOTE_DB) {
+      excludePatchSet = a.getPatchSetId() == null;
+    } else if (bundleA.source == NOTE_DB && bundleB.source == REVIEW_DB) {
+      excludePatchSet = b.getPatchSetId() == null;
+    }
+
+    List<String> exclude = Lists.newArrayList("key");
+    if (excludePatchSet) {
+      exclude.add("patchset");
+    }
+
+    diffColumnsExcluding(
+        tempDiffs, ChangeMessage.class, temp, bundleA, a, bundleB, b, exclude);
+    return tempDiffs.isEmpty();
   }
 
   private static void diffPatchSets(List<String> diffs, ChangeBundle bundleA,
@@ -379,8 +556,18 @@ public class ChangeBundle {
       PatchSet a = as.get(id);
       PatchSet b = bs.get(id);
       String desc = describe(id);
-      diffColumns(diffs, PatchSet.class, desc, bundleA, a, bundleB, b);
+      String pushCertField = "pushCertificate";
+      diffColumnsExcluding(diffs, PatchSet.class, desc, bundleA, a, bundleB, b,
+          pushCertField);
+      diffValues(diffs, desc, trimPushCert(a), trimPushCert(b), pushCertField);
     }
+  }
+
+  private static String trimPushCert(PatchSet ps) {
+    if (ps.getPushCertificate() == null) {
+      return null;
+    }
+    return CharMatcher.is('\n').trimTrailingFrom(ps.getPushCertificate());
   }
 
   private static void diffPatchSetApprovals(List<String> diffs,
@@ -483,13 +670,26 @@ public class ChangeBundle {
         | SecurityException e) {
       throw new IllegalArgumentException(e);
     }
+    diffTimestamps(diffs, desc, bundleA, ta, bundleB, tb, field);
+  }
+
+  private static void diffTimestamps(List<String> diffs, String desc,
+      ChangeBundle bundleA, Timestamp ta, ChangeBundle bundleB, Timestamp tb,
+      String fieldDesc) {
     if (bundleA.source == bundleB.source || ta == null || tb == null) {
-      diffValues(diffs, desc, ta, tb, field);
+      diffValues(diffs, desc, ta, tb, fieldDesc);
     } else if (bundleA.source == NOTE_DB) {
-      diffTimestamps(diffs, desc, ta, tb, field);
+      diffTimestamps(diffs, desc, ta, tb, fieldDesc);
     } else {
-      diffTimestamps(diffs, desc, tb, ta, field);
+      diffTimestamps(diffs, desc, tb, ta, fieldDesc);
     }
+  }
+
+  private static boolean timestampsDiffer(ChangeBundle bundleA, Timestamp ta,
+      ChangeBundle bundleB, Timestamp tb) {
+    List<String> tempDiffs = new ArrayList<>(1);
+    diffTimestamps(tempDiffs, "temp", bundleA, ta, bundleB, tb, "temp");
+    return !tempDiffs.isEmpty();
   }
 
   private static void diffTimestamps(List<String> diffs, String desc,

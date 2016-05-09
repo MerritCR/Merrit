@@ -20,13 +20,14 @@ import com.google.inject.AbstractModule;
 import com.google.inject.Module;
 
 
-public class NoSshKeyCache implements SshKeyCache {
+public class NoSshKeyCache implements SshKeyCache, SshKeyCreator {
 
   public static Module module() {
     return new AbstractModule() {
       @Override
       protected void configure() {
         bind(SshKeyCache.class).to(NoSshKeyCache.class);
+        bind(SshKeyCreator.class).to(NoSshKeyCache.class);
       }
     };
   }

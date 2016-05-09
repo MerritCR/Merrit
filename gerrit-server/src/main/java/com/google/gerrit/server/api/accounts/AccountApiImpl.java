@@ -22,6 +22,7 @@ import com.google.gerrit.extensions.api.accounts.GpgKeyApi;
 import com.google.gerrit.extensions.client.DiffPreferencesInfo;
 import com.google.gerrit.extensions.client.EditPreferencesInfo;
 import com.google.gerrit.extensions.client.GeneralPreferencesInfo;
+import com.google.gerrit.extensions.client.ProjectWatchInfo;
 import com.google.gerrit.extensions.common.AccountInfo;
 import com.google.gerrit.extensions.common.GpgKeyInfo;
 import com.google.gerrit.extensions.common.SshKeyInfo;
@@ -33,14 +34,19 @@ import com.google.gerrit.server.account.AccountLoader;
 import com.google.gerrit.server.account.AccountResource;
 import com.google.gerrit.server.account.AddSshKey;
 import com.google.gerrit.server.account.CreateEmail;
+import com.google.gerrit.server.account.DeleteSshKey;
 import com.google.gerrit.server.account.GetAvatar;
 import com.google.gerrit.server.account.GetDiffPreferences;
 import com.google.gerrit.server.account.GetEditPreferences;
 import com.google.gerrit.server.account.GetPreferences;
 import com.google.gerrit.server.account.GetSshKeys;
+import com.google.gerrit.server.account.GetWatchedProjects;
+import com.google.gerrit.server.account.DeleteWatchedProjects;
 import com.google.gerrit.server.account.SetDiffPreferences;
 import com.google.gerrit.server.account.SetEditPreferences;
 import com.google.gerrit.server.account.SetPreferences;
+import com.google.gerrit.server.account.SshKeys;
+import com.google.gerrit.server.account.PostWatchedProjects;
 import com.google.gerrit.server.account.StarredChanges;
 import com.google.gerrit.server.change.ChangeResource;
 import com.google.gerrit.server.change.ChangesCollection;
@@ -69,12 +75,17 @@ public class AccountApiImpl implements AccountApi {
   private final SetDiffPreferences setDiffPreferences;
   private final GetEditPreferences getEditPreferences;
   private final SetEditPreferences setEditPreferences;
+  private final GetWatchedProjects getWatchedProjects;
+  private final PostWatchedProjects postWatchedProjects;
+  private final DeleteWatchedProjects deleteWatchedProjects;
   private final StarredChanges.Create starredChangesCreate;
   private final StarredChanges.Delete starredChangesDelete;
   private final CreateEmail.Factory createEmailFactory;
   private final GpgApiAdapter gpgApiAdapter;
   private final GetSshKeys getSshKeys;
   private final AddSshKey addSshKey;
+  private final DeleteSshKey deleteSshKey;
+  private final SshKeys sshKeys;
 
   @Inject
   AccountApiImpl(AccountLoader.Factory ailf,
@@ -86,12 +97,17 @@ public class AccountApiImpl implements AccountApi {
       SetDiffPreferences setDiffPreferences,
       GetEditPreferences getEditPreferences,
       SetEditPreferences setEditPreferences,
+      GetWatchedProjects getWatchedProjects,
+      PostWatchedProjects postWatchedProjects,
+      DeleteWatchedProjects deleteWatchedProjects,
       StarredChanges.Create starredChangesCreate,
       StarredChanges.Delete starredChangesDelete,
       CreateEmail.Factory createEmailFactory,
       GpgApiAdapter gpgApiAdapter,
       GetSshKeys getSshKeys,
       AddSshKey addSshKey,
+      DeleteSshKey deleteSshKey,
+      SshKeys sshKeys,
       @Assisted AccountResource account) {
     this.account = account;
     this.accountLoaderFactory = ailf;
@@ -103,11 +119,16 @@ public class AccountApiImpl implements AccountApi {
     this.setDiffPreferences = setDiffPreferences;
     this.getEditPreferences = getEditPreferences;
     this.setEditPreferences = setEditPreferences;
+    this.getWatchedProjects = getWatchedProjects;
+    this.postWatchedProjects = postWatchedProjects;
+    this.deleteWatchedProjects = deleteWatchedProjects;
     this.starredChangesCreate = starredChangesCreate;
     this.starredChangesDelete = starredChangesDelete;
     this.createEmailFactory = createEmailFactory;
     this.getSshKeys = getSshKeys;
     this.addSshKey = addSshKey;
+    this.deleteSshKey = deleteSshKey;
+    this.sshKeys = sshKeys;
     this.gpgApiAdapter = gpgApiAdapter;
   }
 
@@ -184,6 +205,35 @@ public class AccountApiImpl implements AccountApi {
   }
 
   @Override
+  public List<ProjectWatchInfo> getWatchedProjects() throws RestApiException {
+    try {
+      return getWatchedProjects.apply(account);
+    } catch (OrmException e) {
+      throw new RestApiException("Cannot get watched projects", e);
+    }
+  }
+
+  @Override
+  public List<ProjectWatchInfo> setWatchedProjects(
+      List<ProjectWatchInfo> in) throws RestApiException {
+    try {
+      return postWatchedProjects.apply(account, in);
+    } catch (OrmException | IOException e) {
+      throw new RestApiException("Cannot update watched projects", e);
+    }
+  }
+
+  @Override
+  public void deleteWatchedProjects(List<String> in)
+      throws RestApiException {
+    try {
+      deleteWatchedProjects.apply(account, in);
+    } catch (OrmException e) {
+      throw new RestApiException("Cannot delete watched projects", e);
+    }
+  }
+
+  @Override
   public void starChange(String id) throws RestApiException {
     try {
       ChangeResource rsrc = changes.parse(
@@ -225,7 +275,7 @@ public class AccountApiImpl implements AccountApi {
   public List<SshKeyInfo> listSshKeys() throws RestApiException {
     try {
       return getSshKeys.apply(account);
-    } catch (OrmException e) {
+    } catch (OrmException | IOException | ConfigInvalidException e) {
       throw new RestApiException("Cannot list SSH keys", e);
     }
   }
@@ -236,8 +286,19 @@ public class AccountApiImpl implements AccountApi {
     in.raw = RawInputUtil.create(key);
     try {
       return addSshKey.apply(account, in).value();
-    } catch (OrmException | IOException e) {
+    } catch (OrmException | IOException | ConfigInvalidException e) {
       throw new RestApiException("Cannot add SSH key", e);
+    }
+  }
+
+  @Override
+  public void deleteSshKey(int seq) throws RestApiException {
+    try {
+      AccountResource.SshKey sshKeyRes =
+          sshKeys.parse(account, IdString.fromDecoded(Integer.toString(seq)));
+      deleteSshKey.apply(sshKeyRes, null);
+    } catch (OrmException | IOException | ConfigInvalidException e) {
+      throw new RestApiException("Cannot delete SSH key", e);
     }
   }
 

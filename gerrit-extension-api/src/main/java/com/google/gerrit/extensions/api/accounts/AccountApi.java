@@ -17,6 +17,7 @@ package com.google.gerrit.extensions.api.accounts;
 import com.google.gerrit.extensions.client.DiffPreferencesInfo;
 import com.google.gerrit.extensions.client.EditPreferencesInfo;
 import com.google.gerrit.extensions.client.GeneralPreferencesInfo;
+import com.google.gerrit.extensions.client.ProjectWatchInfo;
 import com.google.gerrit.extensions.common.AccountInfo;
 import com.google.gerrit.extensions.common.GpgKeyInfo;
 import com.google.gerrit.extensions.common.SshKeyInfo;
@@ -43,12 +44,19 @@ public interface AccountApi {
   EditPreferencesInfo setEditPreferences(EditPreferencesInfo in)
       throws RestApiException;
 
+  List<ProjectWatchInfo> getWatchedProjects() throws RestApiException;
+  List<ProjectWatchInfo> setWatchedProjects(List<ProjectWatchInfo> in)
+      throws RestApiException;
+  void deleteWatchedProjects(List<String> in)
+      throws RestApiException;
+
   void starChange(String id) throws RestApiException;
   void unstarChange(String id) throws RestApiException;
   void addEmail(EmailInput input) throws RestApiException;
 
   List<SshKeyInfo> listSshKeys() throws RestApiException;
   SshKeyInfo addSshKey(String key) throws RestApiException;
+  void deleteSshKey(int seq) throws RestApiException;
 
   Map<String, GpgKeyInfo> listGpgKeys() throws RestApiException;
   Map<String, GpgKeyInfo> putGpgKeys(List<String> add, List<String> remove)
@@ -104,6 +112,24 @@ public interface AccountApi {
     }
 
     @Override
+    public List<ProjectWatchInfo> getWatchedProjects()
+        throws RestApiException {
+      throw new NotImplementedException();
+    }
+
+    @Override
+    public List<ProjectWatchInfo> setWatchedProjects(
+        List<ProjectWatchInfo> in) throws RestApiException {
+      throw new NotImplementedException();
+    }
+
+    @Override
+    public void deleteWatchedProjects(List<String> in)
+        throws RestApiException {
+      throw new NotImplementedException();
+    }
+
+    @Override
     public void starChange(String id) throws RestApiException {
       throw new NotImplementedException();
     }
@@ -125,6 +151,11 @@ public interface AccountApi {
 
     @Override
     public SshKeyInfo addSshKey(String key) throws RestApiException {
+      throw new NotImplementedException();
+    }
+
+    @Override
+    public void deleteSshKey(int seq) throws RestApiException {
       throw new NotImplementedException();
     }
 

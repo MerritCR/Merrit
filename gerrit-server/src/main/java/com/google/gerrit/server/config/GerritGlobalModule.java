@@ -70,6 +70,7 @@ import com.google.gerrit.server.account.GroupControl;
 import com.google.gerrit.server.account.GroupDetailFactory;
 import com.google.gerrit.server.account.GroupIncludeCacheImpl;
 import com.google.gerrit.server.account.GroupMembers;
+import com.google.gerrit.server.account.VersionedAuthorizedKeys;
 import com.google.gerrit.server.api.accounts.AccountExternalIdCreator;
 import com.google.gerrit.server.auth.AuthBackend;
 import com.google.gerrit.server.auth.UniversalAuthBackend;
@@ -108,6 +109,7 @@ import com.google.gerrit.server.index.change.ReindexAfterUpdate;
 import com.google.gerrit.server.mail.AddKeySender;
 import com.google.gerrit.server.mail.AddReviewerSender;
 import com.google.gerrit.server.mail.CreateChangeSender;
+import com.google.gerrit.server.mail.DeleteReviewerSender;
 import com.google.gerrit.server.mail.EmailModule;
 import com.google.gerrit.server.mail.FromAddressGenerator;
 import com.google.gerrit.server.mail.FromAddressGeneratorProvider;
@@ -204,6 +206,7 @@ public class GerritGlobalModule extends FactoryModule {
 
     factory(AccountInfoCacheFactory.Factory.class);
     factory(AddReviewerSender.Factory.class);
+    factory(DeleteReviewerSender.Factory.class);
     factory(AddKeySender.Factory.class);
     factory(BatchUpdate.Factory.class);
     factory(CapabilityControl.Factory.class);
@@ -330,6 +333,7 @@ public class GerritGlobalModule extends FactoryModule {
     factory(SubmoduleSectionParser.Factory.class);
     factory(ReplaceOp.Factory.class);
     factory(GitModules.Factory.class);
+    factory(VersionedAuthorizedKeys.Factory.class);
 
     bind(AccountManager.class);
     factory(ChangeUserName.Factory.class);

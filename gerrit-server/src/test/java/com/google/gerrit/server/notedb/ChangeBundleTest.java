@@ -117,7 +117,7 @@ public class ChangeBundleTest {
         "changeId differs for Changes: {" + id1 + "} != {" + id2 + "}",
         "createdOn differs for Changes:"
             + " {2009-09-30 17:00:00.0} != {2009-09-30 17:00:06.0}",
-        "lastUpdatedOn differs for Changes:"
+        "effective last updated time differs for Changes:"
             + " {2009-09-30 17:00:00.0} != {2009-09-30 17:00:06.0}");
   }
 
@@ -155,7 +155,7 @@ public class ChangeBundleTest {
     assertDiffs(b1, b2,
         "createdOn differs for Change.Id " + c1.getId() + ":"
             + " {2009-09-30 17:00:01.0} != {2009-09-30 17:00:02.0}",
-        "lastUpdatedOn differs for Change.Id " + c1.getId() + ":"
+        "effective last updated time differs for Change.Id " + c1.getId() + ":"
             + " {2009-09-30 17:00:01.0} != {2009-09-30 17:00:03.0}");
 
     // One NoteDb, slop is allowed.
@@ -174,11 +174,194 @@ public class ChangeBundleTest {
         comments(), NOTE_DB);
     ChangeBundle b3 = new ChangeBundle(c3, messages(), patchSets(), approvals(),
         comments(), REVIEW_DB);
-    String msg = "lastUpdatedOn differs for Change.Id " + c1.getId()
-        + " in NoteDb vs. ReviewDb:"
+    String msg = "effective last updated time differs for Change.Id "
+        + c1.getId() + " in NoteDb vs. ReviewDb:"
         + " {2009-09-30 17:00:01.0} != {2009-09-30 17:00:10.0}";
     assertDiffs(b1, b3, msg);
     assertDiffs(b3, b1, msg);
+  }
+
+  @Test
+  public void diffChangesIgnoresOriginalSubjectInReviewDb()
+      throws Exception {
+    Change c1 = TestChanges.newChange(
+        new Project.NameKey("project"), new Account.Id(100));
+    c1.setCurrentPatchSet(c1.currentPatchSetId(), "Subject", "Original A");
+    Change c2 = clone(c1);
+    c2.setCurrentPatchSet(
+        c2.currentPatchSetId(), c1.getSubject(), "Original B");
+
+    // Both ReviewDb, exact match required.
+    ChangeBundle b1 = new ChangeBundle(c1, messages(), patchSets(), approvals(),
+        comments(), REVIEW_DB);
+    ChangeBundle b2 = new ChangeBundle(c2, messages(), patchSets(), approvals(),
+        comments(), REVIEW_DB);
+    assertDiffs(b1, b2,
+        "originalSubject differs for Change.Id " + c1.getId() + ":"
+            + " {Original A} != {Original B}");
+
+    // Both NoteDb, exact match required.
+    b1 = new ChangeBundle(c1, messages(), patchSets(), approvals(), comments(),
+        NOTE_DB);
+    b2 = new ChangeBundle(c2, messages(), patchSets(), approvals(), comments(),
+        NOTE_DB);
+    assertDiffs(b1, b2,
+        "originalSubject differs for Change.Id " + c1.getId() + ":"
+            + " {Original A} != {Original B}");
+
+    // One ReviewDb, one NoteDb, original subject is ignored.
+    b1 = new ChangeBundle(c1, messages(), patchSets(), approvals(), comments(),
+        REVIEW_DB);
+    b2 = new ChangeBundle(c2, messages(), patchSets(), approvals(), comments(),
+        NOTE_DB);
+    assertNoDiffs(b1, b2);
+    assertNoDiffs(b2, b1);
+  }
+
+  @Test
+  public void diffChangesConsidersEmptyReviewDbTopicEquivalentToNullInNoteDb()
+      throws Exception {
+    Change c1 = TestChanges.newChange(
+        new Project.NameKey("project"), new Account.Id(100));
+    c1.setTopic("");
+    Change c2 = clone(c1);
+    c2.setTopic(null);
+
+    // Both ReviewDb, exact match required.
+    ChangeBundle b1 = new ChangeBundle(c1, messages(), patchSets(), approvals(),
+        comments(), REVIEW_DB);
+    ChangeBundle b2 = new ChangeBundle(c2, messages(), patchSets(), approvals(),
+        comments(), REVIEW_DB);
+    assertDiffs(b1, b2,
+        "topic differs for Change.Id " + c1.getId() + ":"
+            + " {} != {null}");
+
+    // Topic ignored if ReviewDb is empty and NoteDb is null.
+    b1 = new ChangeBundle(c1, messages(), patchSets(), approvals(), comments(),
+        REVIEW_DB);
+    b2 = new ChangeBundle(c2, messages(), patchSets(), approvals(), comments(),
+        NOTE_DB);
+    assertNoDiffs(b1, b2);
+
+    // Exact match still required if NoteDb has empty value (not realistic).
+    b1 = new ChangeBundle(c1, messages(), patchSets(), approvals(), comments(),
+        NOTE_DB);
+    b2 = new ChangeBundle(c2, messages(), patchSets(), approvals(), comments(),
+        REVIEW_DB);
+    assertDiffs(b1, b2,
+        "topic differs for Change.Id " + c1.getId() + ":"
+            + " {} != {null}");
+
+    // Null is not equal to a non-empty string.
+    Change c3 = clone(c1);
+    c3.setTopic("topic");
+    b1 = new ChangeBundle(c3, messages(), patchSets(), approvals(), comments(),
+        REVIEW_DB);
+    b2 = new ChangeBundle(c2, messages(), patchSets(), approvals(), comments(),
+        NOTE_DB);
+    assertDiffs(b1, b2,
+        "topic differs for Change.Id " + c1.getId() + ":"
+            + " {topic} != {null}");
+  }
+
+  @Test
+  public void diffChangesTakesMaxEntityTimestampFromReviewDb()
+      throws Exception {
+    Change c1 = TestChanges.newChange(
+        new Project.NameKey("project"), new Account.Id(100));
+    PatchSetApproval a = new PatchSetApproval(
+        new PatchSetApproval.Key(
+            c1.currentPatchSetId(), accountId, new LabelId("Code-Review")),
+        (short) 1,
+        TimeUtil.nowTs());
+
+    Change c2 = clone(c1);
+    c2.setLastUpdatedOn(a.getGranted());
+
+    // Both ReviewDb, exact match required.
+    ChangeBundle b1 = new ChangeBundle(c1, messages(), patchSets(),
+        approvals(a), comments(), REVIEW_DB);
+    ChangeBundle b2 = new ChangeBundle(c2, messages(), patchSets(),
+        approvals(a), comments(), REVIEW_DB);
+    assertDiffs(b1, b2,
+        "effective last updated time differs for Change.Id " + c1.getId() + ":"
+            + " {2009-09-30 17:00:00.0} != {2009-09-30 17:00:06.0}");
+
+    // NoteDb allows latest timestamp from all entities in bundle.
+    b2 = new ChangeBundle(c2, messages(), patchSets(),
+        approvals(a), comments(), NOTE_DB);
+    assertNoDiffs(b1, b2);
+  }
+
+  @Test
+  public void diffChangesIgnoresChangeTimestampIfAnyOtherEntitiesExist() {
+    Change c1 = TestChanges.newChange(
+        new Project.NameKey("project"), new Account.Id(100));
+    PatchSetApproval a = new PatchSetApproval(
+        new PatchSetApproval.Key(
+            c1.currentPatchSetId(), accountId, new LabelId("Code-Review")),
+        (short) 1,
+        TimeUtil.nowTs());
+    c1.setLastUpdatedOn(a.getGranted());
+
+    Change c2 = clone(c1);
+    c2.setLastUpdatedOn(TimeUtil.nowTs());
+
+    // ReviewDb has later lastUpdatedOn timestamp than NoteDb, allowed since
+    // NoteDb matches the latest timestamp of a non-Change entity.
+    ChangeBundle b1 = new ChangeBundle(c2, messages(), patchSets(),
+        approvals(a), comments(), REVIEW_DB);
+    ChangeBundle b2 = new ChangeBundle(c1, messages(), patchSets(),
+        approvals(a), comments(), NOTE_DB);
+    assertThat(b1.getChange().getLastUpdatedOn())
+        .isGreaterThan(b2.getChange().getLastUpdatedOn());
+    assertNoDiffs(b1, b2);
+
+    // Timestamps must actually match if Change is the only entity.
+    b1 = new ChangeBundle(c2, messages(), patchSets(), approvals(), comments(),
+        REVIEW_DB);
+    b2 = new ChangeBundle(c1, messages(), patchSets(), approvals(), comments(),
+        NOTE_DB);
+    assertDiffs(b1, b2,
+        "effective last updated time differs for Change.Id " + c1.getId()
+            + " in NoteDb vs. ReviewDb:"
+            + " {2009-09-30 17:00:06.0} != {2009-09-30 17:00:12.0}");
+  }
+
+  @Test
+  public void diffChangesAllowsReviewDbSubjectToBePrefixOfNoteDbSubject()
+      throws Exception {
+    Change c1 = TestChanges.newChange(
+        new Project.NameKey("project"), new Account.Id(100));
+    Change c2 = clone(c1);
+    c2.setCurrentPatchSet(c1.currentPatchSetId(),
+        c1.getSubject().substring(0, 10), c1.getOriginalSubject());
+    assertThat(c2.getSubject()).isNotEqualTo(c1.getSubject());
+
+    // Both ReviewDb, exact match required.
+    ChangeBundle b1 = new ChangeBundle(c1, messages(), patchSets(), approvals(),
+        comments(), REVIEW_DB);
+    ChangeBundle b2 = new ChangeBundle(c2, messages(), patchSets(), approvals(),
+        comments(), REVIEW_DB);
+    assertDiffs(b1, b2,
+        "subject differs for Change.Id " + c1.getId() + ":"
+            + " {Change subject} != {Change sub}");
+
+    // ReviewDb has shorter subject, allowed.
+    b1 = new ChangeBundle(c1, messages(), patchSets(), approvals(),
+        comments(), NOTE_DB);
+    b2 = new ChangeBundle(c2, messages(), patchSets(), approvals(),
+        comments(), REVIEW_DB);
+    assertNoDiffs(b1, b2);
+
+    // NoteDb has shorter subject, not allowed.
+    b1 = new ChangeBundle(c1, messages(), patchSets(), approvals(),
+        comments(), REVIEW_DB);
+    b2 = new ChangeBundle(c2, messages(), patchSets(), approvals(),
+        comments(), NOTE_DB);
+    assertDiffs(b1, b2,
+        "subject differs for Change.Id " + c1.getId() + ":"
+            + " {Change subject} != {Change sub}");
   }
 
   @Test
@@ -278,17 +461,11 @@ public class ChangeBundleTest {
     b2 = new ChangeBundle(c, messages(cm1), patchSets(), approvals(),
         comments(), NOTE_DB);
     assertDiffs(b1, b2,
-        "Differing numbers of ChangeMessages for Change.Id " + id + ":\n"
-        + "ChangeMessage{key=" + id + ",uuid1, author=100,"
-        + " writtenOn=2009-09-30 17:00:06.0, patchset=" + id + ",1, tag=null,"
-        + " message=[message 2]}\n"
-        + "ChangeMessage{key=" + id + ",uuid2, author=100,"
-        + " writtenOn=2009-09-30 17:00:12.0, patchset=" + id + ",1, tag=null,"
-        + " message=[null]}\n"
-        + "--- vs. ---\n"
-        + "ChangeMessage{key=" + id + ",uuid1, author=100,"
-        + " writtenOn=2009-09-30 17:00:06.0, patchset=" + id + ",1, tag=null,"
-        + " message=[message 2]}");
+        "ChangeMessages differ for Change.Id " + id + "\n"
+            + "Only in A:\n  " + cm2);
+    assertDiffs(b2, b1,
+        "ChangeMessages differ for Change.Id " + id + "\n"
+            + "Only in B:\n  " + cm2);
   }
 
   @Test
@@ -308,9 +485,17 @@ public class ChangeBundleTest {
         approvals(), comments(), REVIEW_DB);
     ChangeBundle b2 = new ChangeBundle(c, messages(cm2, cm3), patchSets(),
         approvals(), comments(), NOTE_DB);
+    // Implementation happens to pair up cm1 in b1 with cm3 in b2 because it
+    // depends on iteration order and doesn't care about UUIDs. The important
+    // thing is that there's some diff.
     assertDiffs(b1, b2,
-        "message differs for ChangeMessage on " + id + " at index 1:"
-        + " {message 1} != {message 2}");
+        "ChangeMessages differ for Change.Id " + id + "\n"
+            + "Only in A:\n  " + cm3 + "\n"
+            + "Only in B:\n  " + cm2);
+    assertDiffs(b2, b1,
+        "ChangeMessages differ for Change.Id " + id + "\n"
+            + "Only in A:\n  " + cm2 + "\n"
+            + "Only in B:\n  " + cm3);
   }
 
   @Test
@@ -348,11 +533,15 @@ public class ChangeBundleTest {
         comments(), NOTE_DB);
     ChangeBundle b3 = new ChangeBundle(c, messages(cm3), patchSets(),
         approvals(), comments(), REVIEW_DB);
-    String msg = "writtenOn differs for ChangeMessage on " + c.getId() +
-        " at index 0 in NoteDb vs. ReviewDb:"
-        + " {2009-09-30 17:00:02.0} != {2009-09-30 17:00:10.0}";
-    assertDiffs(b1, b3, msg);
-    assertDiffs(b3, b1, msg);
+    int id = c.getId().get();
+    assertDiffs(b1, b3,
+        "ChangeMessages differ for Change.Id " + id + "\n"
+            + "Only in A:\n  " + cm1 + "\n"
+            + "Only in B:\n  " + cm3);
+    assertDiffs(b3, b1,
+        "ChangeMessages differ for Change.Id " + id + "\n"
+            + "Only in A:\n  " + cm3 + "\n"
+            + "Only in B:\n  " + cm1);
   }
 
   @Test
@@ -390,8 +579,13 @@ public class ChangeBundleTest {
     b2 = new ChangeBundle(c, messages(cm2), patchSets(), approvals(),
         comments(), NOTE_DB);
     assertDiffs(b1, b2,
-        "patchset differs for ChangeMessage on " + id + " at index 0:"
-            + " {" + id + ",1} != {null}");
+        "ChangeMessages differ for Change.Id " + id + "\n"
+            + "Only in A:\n  " + cm1 + "\n"
+            + "Only in B:\n  " + cm2);
+    assertDiffs(b2, b1,
+        "ChangeMessages differ for Change.Id " + id + "\n"
+            + "Only in A:\n  " + cm2 + "\n"
+            + "Only in B:\n  " + cm1);
   }
 
   @Test
@@ -480,6 +674,34 @@ public class ChangeBundleTest {
         + " {2009-09-30 17:00:02.0} != {2009-09-30 17:00:10.0}";
     assertDiffs(b1, b3, msg);
     assertDiffs(b3, b1, msg);
+  }
+
+  @Test
+  public void diffPatchSetsIgnoresTrailingNewlinesInPushCertificate()
+      throws Exception {
+    subWindowResolution();
+    Change c = TestChanges.newChange(project, accountId);
+    PatchSet ps1 = new PatchSet(c.currentPatchSetId());
+    ps1.setRevision(new RevId("deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"));
+    ps1.setUploader(accountId);
+    ps1.setCreatedOn(roundToSecond(TimeUtil.nowTs()));
+    ps1.setPushCertificate("some cert");
+    PatchSet ps2 = clone(ps1);
+    ps2.setPushCertificate(ps2.getPushCertificate() + "\n\n");
+
+    ChangeBundle b1 = new ChangeBundle(c, messages(), patchSets(ps1),
+        approvals(), comments(), NOTE_DB);
+    ChangeBundle b2 = new ChangeBundle(c, messages(), patchSets(ps2),
+        approvals(), comments(), REVIEW_DB);
+    assertNoDiffs(b1, b2);
+    assertNoDiffs(b2, b1);
+
+    b1 = new ChangeBundle(c, messages(), patchSets(ps1), approvals(),
+        comments(), REVIEW_DB);
+    b2 = new ChangeBundle(c, messages(), patchSets(ps2), approvals(),
+        comments(), NOTE_DB);
+    assertNoDiffs(b1, b2);
+    assertNoDiffs(b2, b1);
   }
 
   @Test

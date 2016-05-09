@@ -154,11 +154,11 @@ Tag the plugins:
 [[build-gerrit]]
 === Build Gerrit
 
-* Build the Gerrit WAR and API JARs
+* Build the Gerrit WAR, API JARs and documentation
 +
 ----
   buck clean
-  buck build --no-cache release
+  buck build --no-cache release docs
   buck build api_install
 ----
 
@@ -191,26 +191,19 @@ Versions and Create Release Tag] section.
 * Push the WAR to Maven Central:
 +
 ----
-  buck build war_deploy
+  sh tools/maven/api.sh war_deploy
 ----
 
 * Push the plugin artifacts to Maven Central:
 +
 ----
-  buck build api_deploy
-----
-+
-For troubleshooting, the environment variable `VERBOSE` can be set. This
-prints out the commands that are executed by the Buck build process:
-+
-----
-  VERBOSE=1 buck build api_deploy
+  sh tools/maven/api.sh deploy
 ----
 +
 If no artifacts are uploaded, clean the `buck-out` folder and retry:
 +
 ----
-  rm -rf buck-out
+  buck clean ; rm -rf buck-out
 ----
 
 * Push the plugin Maven archetypes to Maven Central:
@@ -345,8 +338,8 @@ Push the new Release Tag on the plugins:
   make -C ReleaseNotes
 ----
 
-* Extract the documentation files from the zip file generated during
-the release build: `buck-out/gen/Documentation/html/html.zip`.
+* Extract the documentation files from the zip file generated from
+`buck build docs`: `buck-out/gen/Documentation/searchfree/searchfree.zip`.
 
 * Upload the files manually via web browser to the appropriate folder
 in the

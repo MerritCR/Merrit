@@ -641,6 +641,9 @@ Adds an SSH key for a user.
 
 The SSH public key must be provided as raw content in the request body.
 
+Trying to add an SSH key that already exists succeeds, but no new SSH
+key is persisted.
+
 .Request
 ----
   POST /accounts/self/sshkeys HTTP/1.0
@@ -1105,11 +1108,13 @@ any account.
     "changes_per_page": 25,
     "show_site_header": true,
     "use_flash_clipboard": true,
+    "download_command": "CHECKOUT",
     "date_format": "STD",
     "time_format": "HHMM_12",
+    "diff_view": "SIDE_BY_SIDE",
     "size_bar_in_change_table": true,
     "review_category_strategy": "ABBREV",
-    "diff_view": "SIDE_BY_SIDE",
+    "mute_common_path_prefixes": true,
     "my": [
       {
         "url": "#/dashboard/self",
@@ -1159,11 +1164,13 @@ link:#preferences-input[PreferencesInput] entity.
     "changes_per_page": 50,
     "show_site_header": true,
     "use_flash_clipboard": true,
+    "download_command": "CHECKOUT",
     "date_format": "STD",
     "time_format": "HHMM_12",
     "size_bar_in_change_table": true,
     "review_category_strategy": "NAME",
     "diff_view": "SIDE_BY_SIDE",
+    "mute_common_path_prefixes": true,
     "my": [
       {
         "url": "#/dashboard/self",
@@ -1207,11 +1214,13 @@ link:#preferences-info[PreferencesInfo] entity.
     "changes_per_page": 50,
     "show_site_header": true,
     "use_flash_clipboard": true,
+    "download_command": "CHECKOUT",
     "date_format": "STD",
     "time_format": "HHMM_12",
     "size_bar_in_change_table": true,
     "review_category_strategy": "NAME",
     "diff_view": "SIDE_BY_SIDE",
+    "mute_common_path_prefixes": true,
     "my": [
       {
         "url": "#/dashboard/self",
@@ -1426,6 +1435,142 @@ link:#edit-preferences-info[EditPreferencesInfo] entity.
     "match_brackets": true,
     "auto_close_brackets": true
   }
+----
+
+[[get-watched-projects]]
+=== Get Watched Projects
+--
+'GET /accounts/link:#account-id[\{account-id\}]/watched.projects'
+--
+
+Retrieves all projects a user is watching.
+
+.Request
+----
+  GET /a/accounts/self/watched.projects HTTP/1.0
+----
+
+As result the watched projects of the user are returned as a list of
+link:#project-watch-info[ProjectWatchInfo] entities.
+The result is sorted by project name in ascending order.
+
+.Response
+----
+  HTTP/1.1 200 OK
+  Content-Disposition: attachment
+  Content-Type: application/json; charset=UTF-8
+
+  )]}'
+  [
+    {
+      "project": "Test Project 1",
+      "notify_new_changes": true,
+      "notify_new_patch_sets": true,
+      "notify_all_comments": true,
+    },
+    {
+      "project": "Test Project 2",
+      "filter": "branch:experimental",
+      "notify_all_comments": true,
+      "notify_submitted_changes": true,
+      "notify_abandoned_changes": true
+    }
+  ]
+----
+
+[[set-watched-projects]]
+=== Add/Update a List of Watched Project Entities
+--
+'POST /accounts/link:#account-id[\{account-id\}]/watched.projects'
+--
+
+Add new projects to watch or update existing watched projects.
+Projects that are already watched by a user will be updated with
+the provided configuration. All other projects in the request
+will be watched using the provided configuration. The posted body
+can contain link:#project-watch-info[ProjectWatchInfo] entities.
+Omitted boolean values will be set to false.
+
+.Request
+----
+  POST /a/accounts/self/watched.projects HTTP/1.0
+  Content-Type: application/json;charset=UTF-8
+
+  [
+    {
+      "project": "Test Project 1",
+      "notify_new_changes": true,
+      "notify_new_patch_sets": true,
+      "notify_all_comments": true,
+    }
+  ]
+----
+
+As result the watched projects of the user are returned as a list of
+link:#project-watch-info[ProjectWatchInfo] entities.
+The result is sorted by project name in ascending order.
+
+.Response
+----
+  HTTP/1.1 200 OK
+  Content-Disposition: attachment
+  Content-Type: application/json; charset=UTF-8
+
+  )]}'
+  [
+    {
+      "project": "Test Project 1",
+      "notify_new_changes": true,
+      "notify_new_patch_sets": true,
+      "notify_all_comments": true,
+    },
+    {
+      "project": "Test Project 2",
+      "notify_new_changes": true,
+      "notify_new_patch_sets": true,
+      "notify_all_comments": true,
+    }
+  ]
+----
+
+[[delete-watched-projects]]
+=== Delete Watched Projects
+--
+'POST /accounts/link:#account-id[\{account-id\}]/watched.projects:delete'
+--
+
+Projects posted to this endpoint will no longer be watched. The posted body
+can contain an array of project names as strings.
+
+.Request
+----
+  POST /a/accounts/self/watched.projects:delete HTTP/1.0
+  Content-Type: application/json;charset=UTF-8
+
+  [
+    "Test Project 1"
+  ]
+----
+
+As result the watched projects of the user are returned as a list of
+link:#project-watch-info[ProjectWatchInfo] entities.
+The result is sorted by project name in ascending order.
+
+.Response
+----
+  HTTP/1.1 200 OK
+  Content-Disposition: attachment
+  Content-Type: application/json; charset=UTF-8
+
+  )]}'
+  [
+    {
+      "project": "Test Project 2",
+      "notify_new_changes": true,
+      "notify_new_patch_sets": true,
+      "notify_all_comments": true,
+    }
+  ]
 ----
 
 [[get-starred-changes]]
@@ -1944,7 +2089,7 @@ Allowed values are `10`, `25`, `50`, `100`.
 Whether the site header should be shown.
 |`use_flash_clipboard`          |not set if `false`|
 Whether to use the flash clipboard widget.
-|`download_scheme`              ||
+|`download_scheme`              |optional|
 The type of download URL the user prefers to use. May be any key from
 the `schemes` map in
 link:rest-api-config.html#download-info[DownloadInfo].
@@ -1981,7 +2126,7 @@ link:rest-api-config.html#top-menu-item-info[TopMenuItemInfo] entities.
 |`url_aliases`                  |optional|
 A map of URL path pairs, where the first URL path is an alias for the
 second URL path.
-|`email_notifications`          ||
+|`email_strategy`               ||
 The type of email strategy to use. On `ENABLED`, the user will receive emails
 from Gerrit. On `CC_ON_OWN_COMMENTS` the user will also receive emails for
 their own comments. On `DISABLED` the user will not receive any email
@@ -2039,6 +2184,12 @@ link:rest-api-config.html#top-menu-item-info[TopMenuItemInfo] entities.
 |`url_aliases`                  |optional|
 A map of URL path pairs, where the first URL path is an alias for the
 second URL path.
+|`email_strategy`               |optional|
+The type of email strategy to use. On `ENABLED`, the user will receive emails
+from Gerrit. On `CC_ON_OWN_COMMENTS` the user will also receive emails for
+their own comments. On `DISABLED` the user will not receive any email
+notifications from Gerrit.
+Allowed values are `ENABLED`, `CC_ON_OWN_COMMENTS`, `DISABLED`.
 |============================================
 
 [[query-limit-info]]
@@ -2080,6 +2231,22 @@ username for an account.
 |`username` |The new username of the account.
 |=======================
 
+[[project-watch-info]]
+=== ProjectWatchInfo
+The `WatchedProjectsInfo` entity contains information about a project watch
+for a user.
+
+[options="header",cols="1,^1,5"]
+|=======================
+|Field Name                 |        |Description
+|`project`                  |        |The name of the project.
+|`filter`                   |optional|A filter string to be applied to the project.
+|`notify_new_changes`       |optional|Notify on new changes.
+|`notify_new_patch_sets`    |optional|Notify on new patch sets.
+|`notify_all_comments`      |optional|Notify on comments.
+|`notify_submitted_changes` |optional|Notify on submitted changes.
+|`notify_abandoned_changes` |optional|Notify on abandoned changes.
+|=======================
 
 GERRIT
 ------

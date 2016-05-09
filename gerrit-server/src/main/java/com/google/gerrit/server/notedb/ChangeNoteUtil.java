@@ -21,7 +21,6 @@ import static java.nio.charset.StandardCharsets.UTF_8;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.ImmutableList;
-import com.google.common.collect.Lists;
 import com.google.common.collect.Multimap;
 import com.google.common.primitives.Ints;
 import com.google.gerrit.reviewdb.client.Account;
@@ -31,7 +30,6 @@ import com.google.gerrit.reviewdb.client.Patch;
 import com.google.gerrit.reviewdb.client.PatchLineComment;
 import com.google.gerrit.reviewdb.client.PatchLineComment.Status;
 import com.google.gerrit.reviewdb.client.PatchSet;
-import com.google.gerrit.reviewdb.client.RefNames;
 import com.google.gerrit.reviewdb.client.RevId;
 import com.google.gerrit.reviewdb.server.ReviewDbUtil;
 import com.google.gerrit.server.GerritPersonIdent;
@@ -55,6 +53,7 @@ import java.io.OutputStreamWriter;
 import java.io.PrintWriter;
 import java.sql.Timestamp;
 import java.text.ParseException;
+import java.util.ArrayList;
 import java.util.Date;
 import java.util.HashSet;
 import java.util.List;
@@ -87,21 +86,6 @@ public class ChangeNoteUtil {
   private static final String REVISION = "Revision";
   private static final String UUID = "UUID";
   private static final String TAG = FOOTER_TAG.getName();
-
-  public static String changeRefName(Change.Id id) {
-    StringBuilder r = new StringBuilder();
-    r.append(RefNames.REFS_CHANGES);
-    int n = id.get();
-    int m = n % 100;
-    if (m < 10) {
-      r.append('0');
-    }
-    r.append(m);
-    r.append('/');
-    r.append(n);
-    r.append(RefNames.META_SUFFIX);
-    return r.toString();
-  }
 
   public static String formatTime(PersonIdent ident, Timestamp t) {
     GitDateFormatter dateFormatter = new GitDateFormatter(Format.DEFAULT);
@@ -163,7 +147,7 @@ public class ChangeNoteUtil {
       return ImmutableList.of();
     }
     Set<PatchLineComment.Key> seen = new HashSet<>();
-    List<PatchLineComment> result = Lists.newArrayList();
+    List<PatchLineComment> result = new ArrayList<>();
     int sizeOfNote = note.length;
     byte[] psb = PATCH_SET.getBytes(UTF_8);
     byte[] bpsb = BASE_PATCH_SET.getBytes(UTF_8);
@@ -539,9 +523,12 @@ public class ChangeNoteUtil {
     PersonIdent ident = newIdent(
         accountCache.get(c.getAuthor()).getAccount(),
         c.getWrittenOn(), serverIdent, anonymousCowardName);
-    String nameString = ident.getName() + " <" + ident.getEmailAddress()
-        + ">";
-    appendHeaderField(writer, AUTHOR, nameString);
+    StringBuilder name = new StringBuilder();
+    PersonIdent.appendSanitized(name, ident.getName());
+    name.append(" <");
+    PersonIdent.appendSanitized(name, ident.getEmailAddress());
+    name.append('>');
+    appendHeaderField(writer, AUTHOR, name.toString());
 
     String parent = c.getParentUuid();
     if (parent != null) {

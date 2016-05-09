@@ -341,6 +341,7 @@ public class ReceiveCommits {
   private final Provider<SubmoduleOp> subOpProvider;
   private final Provider<Submit> submitProvider;
   private final Provider<MergeOp> mergeOpProvider;
+  private final Provider<MergeOpRepoManager> ormProvider;
   private final DynamicMap<ProjectConfigEntry> pluginConfigEntries;
   private final NotesMigration notesMigration;
   private final ChangeEditUtil editUtil;
@@ -391,6 +392,7 @@ public class ReceiveCommits {
       Provider<SubmoduleOp> subOpProvider,
       Provider<Submit> submitProvider,
       Provider<MergeOp> mergeOpProvider,
+      Provider<MergeOpRepoManager> ormProvider,
       DynamicMap<ProjectConfigEntry> pluginConfigEntries,
       NotesMigration notesMigration,
       ChangeEditUtil editUtil,
@@ -440,6 +442,7 @@ public class ReceiveCommits {
     this.subOpProvider = subOpProvider;
     this.submitProvider = submitProvider;
     this.mergeOpProvider = mergeOpProvider;
+    this.ormProvider = ormProvider;
     this.pluginConfigEntries = pluginConfigEntries;
     this.notesMigration = notesMigration;
 
@@ -474,9 +477,11 @@ public class ReceiveCommits {
     });
 
     if (!projectControl.allRefsAreVisible()) {
-      rp.setCheckReferencedObjectsAreReachable(receiveConfig.checkReferencedObjectsAreReachable);
-      rp.setAdvertiseRefsHook(new VisibleRefFilter(tagCache, changeCache, repo, projectControl, db, false));
+      rp.setCheckReferencedObjectsAreReachable(
+          receiveConfig.checkReferencedObjectsAreReachable);
     }
+    rp.setAdvertiseRefsHook(new VisibleRefFilter(tagCache, changeCache, repo,
+        projectControl, db, false));
     List<AdvertiseRefsHook> advHooks = new ArrayList<>(3);
     advHooks.add(new AdvertiseRefsHook() {
       @Override
@@ -626,7 +631,7 @@ public class ReceiveCommits {
       rp.sendMessage(COMMAND_REJECTION_MESSAGE_FOOTER);
     }
 
-    Set<Branch.NameKey> branches = Sets.newHashSet();
+    Set<Branch.NameKey> branches = new HashSet<>();
     for (ReceiveCommand c : commands) {
         if (c.getResult() == OK) {
           if (c.getType() == ReceiveCommand.Type.UPDATE) { // aka fast-forward
@@ -673,8 +678,9 @@ public class ReceiveCommits {
     }
     // Update superproject gitlinks if required.
     SubmoduleOp op = subOpProvider.get();
-    try {
-      op.updateSuperProjects(db, branches, "receiveID");
+    try (MergeOpRepoManager orm = ormProvider.get()) {
+      orm.setContext(db, TimeUtil.nowTs(), user);
+      op.updateSuperProjects(db, branches, "receiveID", orm);
     } catch (SubmoduleException e) {
       log.error("Can't update the superprojects", e);
     }
@@ -783,7 +789,7 @@ public class ReceiveCommits {
       return;
     }
 
-    List<String> lastCreateChangeErrors = Lists.newArrayList();
+    List<String> lastCreateChangeErrors = new ArrayList<>();
     for (CreateRequest create : newChanges) {
       if (create.cmd.getResult() == OK) {
         okToInsert++;
@@ -813,7 +819,7 @@ public class ReceiveCommits {
     }
 
     try {
-      List<CheckedFuture<?, RestApiException>> futures = Lists.newArrayList();
+      List<CheckedFuture<?, RestApiException>> futures = new ArrayList<>();
       for (ReplaceRequest replace : replaceByChange.values()) {
         if (replace.inputCommand == magicBranch.cmd) {
           futures.add(replace.insertPatchSet());
@@ -1212,7 +1218,6 @@ public class ReceiveCommits {
       //TODO(dpursehouse): validate hashtags
     }
 
-    @Inject
     MagicBranchInput(ReceiveCommand cmd, LabelTypes labelTypes,
         NotesMigration notesMigration) {
       this.cmd = cmd;
@@ -1499,10 +1504,10 @@ public class ReceiveCommits {
   }
 
   private void selectNewAndReplacedChangesFromMagicBranch() {
-    newChanges = Lists.newArrayList();
+    newChanges = new ArrayList<>();
 
-    SetMultimap<ObjectId, Ref> existing = HashMultimap.create();
-    GroupCollector groupCollector = GroupCollector.create(changeRefsById(), db, psUtil,
+    SetMultimap<ObjectId, Ref> existing = changeRefsById();
+    GroupCollector groupCollector = GroupCollector.create(refsById, db, psUtil,
         notesFactory, project.getNameKey());
 
     rp.getRevWalk().reset();
@@ -1523,11 +1528,10 @@ public class ReceiveCommits {
       } else {
         markHeadsAsUninteresting(
             rp.getRevWalk(),
-            existing,
             magicBranch.ctl != null ? magicBranch.ctl.getRefName() : null);
       }
 
-      List<ChangeLookup> pending = Lists.newArrayList();
+      List<ChangeLookup> pending = new ArrayList<>();
       Set<Change.Key> newChangeIds = new HashSet<>();
       int maxBatchChanges =
           receiveConfig.getEffectiveMaxBatchChangesLimit(user);
@@ -1680,23 +1684,15 @@ public class ReceiveCommits {
     }
   }
 
-  private void markHeadsAsUninteresting(
-      final RevWalk walk,
-      SetMultimap<ObjectId, Ref> existing,
-      @Nullable String forRef) {
+  private void markHeadsAsUninteresting(RevWalk rw, @Nullable String forRef) {
     for (Ref ref : allRefs.values()) {
-      if (ref.getObjectId() == null) {
-        continue;
-      } else if (ref.getName().startsWith(REFS_CHANGES)) {
-        existing.put(ref.getObjectId(), ref);
-      } else if (ref.getName().startsWith(R_HEADS)
-          || (forRef != null && forRef.equals(ref.getName()))) {
+      if ((ref.getName().startsWith(R_HEADS) || ref.getName().equals(forRef))
+          && ref.getObjectId() != null) {
         try {
-          walk.markUninteresting(walk.parseCommit(ref.getObjectId()));
+          rw.markUninteresting(rw.parseCommit(ref.getObjectId()));
         } catch (IOException e) {
           log.warn(String.format("Invalid ref %s in %s",
               ref.getName(), project.getName()), e);
-          continue;
         }
       }
     }
@@ -2034,7 +2030,7 @@ public class ReceiveCommits {
               reader.abbreviate(newCommit).name()));
         } else {
           StringBuilder msg = new StringBuilder();
-          msg.append("(W) ");
+          msg.append("(I) ");
           msg.append(reader.abbreviate(newCommit).name());
           msg.append(":");
           msg.append(" no files changed");
@@ -2339,11 +2335,11 @@ public class ReceiveCommits {
       if (!(parsedObject instanceof RevCommit)) {
         return;
       }
-      SetMultimap<ObjectId, Ref> existing = HashMultimap.create();
       walk.markStart((RevCommit)parsedObject);
-      markHeadsAsUninteresting(walk, existing, cmd.getRefName());
+      markHeadsAsUninteresting(walk, cmd.getRefName());
+      Set<ObjectId> existing = changeRefsById().keySet();
       for (RevCommit c; (c = walk.next()) != null;) {
-        if (existing.keySet().contains(c)) {
+        if (existing.contains(c)) {
           continue;
         } else if (!validCommit(walk, ctl, cmd, c)) {
           break;
@@ -2522,7 +2518,6 @@ public class ReceiveCommits {
           if (change.getStatus().isOpen()) {
             change.setCurrentPatchSet(info);
             change.setStatus(Change.Status.MERGED);
-            ctx.saveChange();
 
             // we cannot reconstruct the submit records for when this change was
             // submitted, this is why we must fix the status

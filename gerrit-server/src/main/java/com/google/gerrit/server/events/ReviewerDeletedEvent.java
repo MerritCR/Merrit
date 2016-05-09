@@ -11,26 +11,21 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-(function() {
-  'use strict';
 
-  Polymer({
-    is: 'gr-request',
+package com.google.gerrit.server.events;
 
-    hostAttributes: {
-      hidden: true
-    },
+import com.google.common.base.Supplier;
+import com.google.gerrit.reviewdb.client.Change;
+import com.google.gerrit.server.data.AccountAttribute;
+import com.google.gerrit.server.data.ApprovalAttribute;
 
-    send: function(options) {
-      options.headers = options.headers || {};
-      if (options.body != null) {
-        options.headers['content-type'] =
-            options.headers['content-type'] || 'application/json';
-      }
-      options.headers['x-gerrit-auth'] = options.headers['x-gerrit-auth'] ||
-          util.getCookie('XSRF_TOKEN');
-      options.jsonPrefix = options.jsonPrefix || ')]}\'';
-      return this.$.xhr.send(options);
-    },
-  });
-})();
+public class ReviewerDeletedEvent extends PatchSetEvent {
+  static final String TYPE = "reviewer-deleted";
+  public Supplier<AccountAttribute> reviewer;
+  public Supplier<ApprovalAttribute[]> approvals;
+  public String comment;
+
+  public ReviewerDeletedEvent(Change change) {
+    super(TYPE, change);
+  }
+}

@@ -26,13 +26,14 @@ import com.google.inject.Provider;
 import java.sql.PreparedStatement;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
 /** A version of the database schema. */
 public abstract class SchemaVersion {
   /** The current schema version. */
-  public static final Class<Schema_123> C = Schema_123.class;
+  public static final Class<Schema_124> C = Schema_124.class;
 
   public static int getBinaryVersion() {
     return guessVersion(C);
@@ -80,7 +81,7 @@ public abstract class SchemaVersion {
     migrateData(pending, ui, curr, db);
 
     JdbcSchema s = (JdbcSchema) db;
-    final List<String> pruneList = Lists.newArrayList();
+    final List<String> pruneList = new ArrayList<>();
     s.pruneSchema(new StatementExecutor() {
       @Override
       public void execute(String sql) {

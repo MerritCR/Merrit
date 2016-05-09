@@ -15,15 +15,14 @@
 package com.google.gerrit.server.notedb;
 
 import static com.google.common.truth.Truth.assertThat;
+import static com.google.gerrit.reviewdb.client.RefNames.changeMetaRef;
 import static com.google.gerrit.reviewdb.client.RefNames.refsDraftComments;
-import static com.google.gerrit.server.notedb.ChangeNoteUtil.changeRefName;
 import static com.google.gerrit.server.notedb.ReviewerStateInternal.CC;
 import static com.google.gerrit.server.notedb.ReviewerStateInternal.REVIEWER;
 import static com.google.gerrit.testutil.TestChanges.incrementPatchSet;
 import static java.nio.charset.StandardCharsets.UTF_8;
 import static org.eclipse.jgit.lib.Constants.OBJ_BLOB;
 
-import com.google.common.base.CharMatcher;
 import com.google.common.base.Function;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableListMultimap;
@@ -46,6 +45,7 @@ import com.google.gerrit.reviewdb.client.PatchLineComment.Status;
 import com.google.gerrit.reviewdb.client.PatchSet;
 import com.google.gerrit.reviewdb.client.PatchSetApproval;
 import com.google.gerrit.reviewdb.client.RevId;
+import com.google.gerrit.server.IdentifiedUser;
 import com.google.gerrit.server.notedb.ChangeNotesCommit.ChangeNotesRevWalk;
 import com.google.gwtorm.server.OrmException;
 import com.google.inject.Inject;
@@ -526,7 +526,7 @@ public class ChangeNotesTest extends AbstractChangeNotesTest {
   @Test
   public void emptyChangeUpdate() throws Exception {
     Change c = newChange();
-    Ref initial = repo.exactRef(changeRefName(c.getId()));
+    Ref initial = repo.exactRef(changeMetaRef(c.getId()));
     assertThat(initial).isNotNull();
 
     // Empty update doesn't create a new commit.
@@ -534,7 +534,7 @@ public class ChangeNotesTest extends AbstractChangeNotesTest {
     update.commit();
     assertThat(update.getResult()).isNull();
 
-    Ref updated = repo.exactRef(changeRefName(c.getId()));
+    Ref updated = repo.exactRef(changeMetaRef(c.getId()));
     assertThat(updated.getObjectId()).isEqualTo(initial.getObjectId());
   }
 
@@ -729,18 +729,17 @@ public class ChangeNotesTest extends AbstractChangeNotesTest {
     Timestamp ts7 = newNotes(c).getChange().getLastUpdatedOn();
     assertThat(ts7).isGreaterThan(ts6);
 
-    // Updates that should not touch the timestamp.
     update = newUpdate(c, changeOwner);
     update.putReviewer(otherUser.getAccountId(), ReviewerStateInternal.REVIEWER);
     update.commit();
     Timestamp ts8 = newNotes(c).getChange().getLastUpdatedOn();
-    assertThat(ts8).isEqualTo(ts7);
+    assertThat(ts8).isGreaterThan(ts7);
 
     update = newUpdate(c, changeOwner);
     update.setGroups(ImmutableList.of("a", "b"));
     update.commit();
     Timestamp ts9 = newNotes(c).getChange().getLastUpdatedOn();
-    assertThat(ts9).isEqualTo(ts8);
+    assertThat(ts9).isGreaterThan(ts8);
 
     // Finish off by merging the change.
     update = newUpdate(c, changeOwner);
@@ -900,7 +899,6 @@ public class ChangeNotesTest extends AbstractChangeNotesTest {
       + "\n"
       + "Nor is this a real signature.\n"
       + "-----END PGP SIGNATURE-----\n";
-    String trimmedCert = CharMatcher.is('\n').trimTrailingFrom(pushCert);
 
     // ps2 with push cert
     Change c = newChange();
@@ -917,8 +915,7 @@ public class ChangeNotesTest extends AbstractChangeNotesTest {
     assertThat(readNote(notes, commit)).isEqualTo(pushCert);
     Map<PatchSet.Id, PatchSet> patchSets = notes.getPatchSets();
     assertThat(patchSets.get(psId1).getPushCertificate()).isNull();
-    assertThat(patchSets.get(psId2).getPushCertificate())
-        .isEqualTo(trimmedCert);
+    assertThat(patchSets.get(psId2).getPushCertificate()).isEqualTo(pushCert);
     assertThat(notes.getComments()).isEmpty();
 
     // comment on ps2
@@ -946,8 +943,7 @@ public class ChangeNotesTest extends AbstractChangeNotesTest {
         + "\n");
     patchSets = notes.getPatchSets();
     assertThat(patchSets.get(psId1).getPushCertificate()).isNull();
-    assertThat(patchSets.get(psId2).getPushCertificate())
-        .isEqualTo(trimmedCert);
+    assertThat(patchSets.get(psId2).getPushCertificate()).isEqualTo(pushCert);
     assertThat(notes.getComments()).isNotEmpty();
   }
 
@@ -1494,6 +1490,58 @@ public class ChangeNotesTest extends AbstractChangeNotesTest {
   }
 
   @Test
+  public void patchLineCommentNotesFormatWeirdUser() throws Exception {
+    Account account = new Account(new Account.Id(3), TimeUtil.nowTs());
+    account.setFullName("Weird\n\u0002<User>\n");
+    account.setPreferredEmail(" we\r\nird@ex>ample<.com");
+    accountCache.put(account);
+    IdentifiedUser user = userFactory.create(account.getId());
+
+    Change c = newChange();
+    ChangeUpdate update = newUpdate(c, user);
+    String uuid = "uuid";
+    CommentRange range = new CommentRange(1, 1, 2, 1);
+    Timestamp time = TimeUtil.nowTs();
+    PatchSet.Id psId = c.currentPatchSetId();
+
+    PatchLineComment comment = newPublishedComment(psId, "file1",
+        uuid, range, range.getEndLine(), user, null, time, "comment",
+        (short) 1, "abcd1234abcd1234abcd1234abcd1234abcd1234");
+    update.setPatchSetId(psId);
+    update.putComment(comment);
+    update.commit();
+
+    ChangeNotes notes = newNotes(c);
+
+    try (RevWalk walk = new RevWalk(repo)) {
+      ArrayList<Note> notesInTree =
+          Lists.newArrayList(notes.revisionNoteMap.noteMap.iterator());
+      Note note = Iterables.getOnlyElement(notesInTree);
+
+      byte[] bytes =
+          walk.getObjectReader().open(
+              note.getData(), Constants.OBJ_BLOB).getBytes();
+      String noteString = new String(bytes, UTF_8);
+      String timeStr = ChangeNoteUtil.formatTime(serverIdent, time);
+      assertThat(noteString).isEqualTo(
+          "Revision: abcd1234abcd1234abcd1234abcd1234abcd1234\n"
+          + "Patch-set: 1\n"
+          + "File: file1\n"
+          + "\n"
+          + "1:1-2:1\n"
+          + timeStr + "\n"
+          + "Author: Weird\u0002User <3@gerrit>\n"
+          + "UUID: uuid\n"
+          + "Bytes: 7\n"
+          + "comment\n"
+          + "\n");
+    }
+
+    assertThat(notes.getComments())
+        .isEqualTo(ImmutableMultimap.of(comment.getRevId(), comment));
+  }
+
+  @Test
   public void patchLineCommentMultipleOnePatchsetOneFileBothSides()
       throws Exception {
     Change c = newChange();
@@ -1882,8 +1930,8 @@ public class ChangeNotesTest extends AbstractChangeNotesTest {
     update.putComment(comment);
     update.commit();
 
-    assertThat(repo.exactRef(changeRefName(c.getId()))).isNotNull();
-    String draftRef = refsDraftComments(otherUser.getAccountId(), c.getId());
+    assertThat(repo.exactRef(changeMetaRef(c.getId()))).isNotNull();
+    String draftRef = refsDraftComments(c.getId(), otherUser.getAccountId());
     assertThat(exactRefAllUsers(draftRef)).isNull();
   }
 
@@ -1905,7 +1953,7 @@ public class ChangeNotesTest extends AbstractChangeNotesTest {
     update.putComment(draft);
     update.commit();
 
-    String draftRef = refsDraftComments(otherUser.getAccountId(), c.getId());
+    String draftRef = refsDraftComments(c.getId(), otherUser.getAccountId());
     ObjectId old = exactRefAllUsers(draftRef);
     assertThat(old).isNotNull();
 
@@ -2079,7 +2127,7 @@ public class ChangeNotesTest extends AbstractChangeNotesTest {
     update.putComment(comment2);
     update.commit();
 
-    String refName = refsDraftComments(otherUserId, c.getId());
+    String refName = refsDraftComments(c.getId(), otherUserId);
     ObjectId oldDraftId = exactRefAllUsers(refName);
 
     update = newUpdate(c, otherUser);
